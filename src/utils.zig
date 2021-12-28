@@ -5,22 +5,48 @@ pub fn print(comptime format: []const u8, args: anytype) void {
     stdout.print(format, args) catch unreachable;
 }
 
-pub fn readNumber(comptime T: type, in: std.fs.File.Reader) !T {
-    var stdout = std.io.getStdOut().writer();
-    var buf: [10]u8 = undefined;
+/// Lee una string de `in`, guardándola en `buf` y devolviendo una slice que
+/// apunta a `buf` con la longitud de la cadena leída
+pub fn readString(in: std.fs.File.Reader, buf: []u8) ![]u8 {
+    while (true) {
+        print("> ", .{});
+        const maybe_result = in.readUntilDelimiterOrEof(buf, '\n') catch |err| switch (err) {
+            // Si el usuario introdujo una entrada demasiado larga (no cabe en buf),
+            // volver a intentarlo
+            error.StreamTooLong => {
+                print("Entrada demasiado larga!\n", .{});
+                try in.skipUntilDelimiterOrEof('\n');
+                continue;
+            },
+            else => return err,
+        };
+        return (maybe_result orelse error.EndOfFile);
+    }
+}
 
+pub fn readNumber(comptime T: type, in: std.fs.File.Reader) !T {
+    var buf: [10]u8 = undefined;
     while (true) {
         // Leer entrada
-        try stdout.print("> ", .{});
-        const input_str = (try in.readUntilDelimiterOrEof(&buf, '\n')) orelse return error.EndOfFile;
+        const input = try readString(in, &buf);
 
         // Parsear la entrada como un entero de tipo `T`
-        const input = std.fmt.parseInt(T, input_str, 10) catch {
-            try stdout.print("Debes introducir un número\n\n", .{});
+        const result = std.fmt.parseInt(T, input, 0) catch {
+            print("Debes introducir un número\n\n", .{});
             continue;
         };
-        return input;
+        return result;
     }
+}
+
+const Md5 = std.crypto.hash.Md5;
+pub const md5_hex_length = Md5.digest_length * 2;
+
+pub fn md5(in: []const u8, out: *[md5_hex_length]u8) void {
+    var hash_bytes: [Md5.digest_length]u8 = undefined;
+    Md5.hash(in, &hash_bytes, .{});
+    const hex_formatter = std.fmt.fmtSliceHexLower(&hash_bytes);
+    _ = std.fmt.bufPrint(out, "{}", .{hex_formatter}) catch unreachable;
 }
 
 pub const DateTime = struct {

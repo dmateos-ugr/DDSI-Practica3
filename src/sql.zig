@@ -2,13 +2,15 @@ const std = @import("std");
 const zdb = @import("zdb");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
+pub const SqlDate = zdb.odbc.Types.CType.SqlDate;
+pub const Error = zdb.odbc.Error;
 
 var sql_allocator: *Allocator = undefined;
 var connection: zdb.DBConnection = undefined;
 
 const CONNECTION_STR = "DRIVER={Oracle 21 ODBC driver};DBQ=oracle0.ugr.es:1521/practbd.oracle0.ugr.es;UID=x7034014;PWD=x7034014;";
 
-pub fn init(allocator: *Allocator, connection_string: []const u8) !void {
+pub fn init(allocator: *Allocator) !void {
     sql_allocator = allocator;
 
     connection = try zdb.DBConnection.initWithConnectionString(CONNECTION_STR);
@@ -30,6 +32,7 @@ pub fn getAllocator() *Allocator {
 var lastError: ?SqlError = null;
 
 pub const SqlError = struct {
+    sql_state: Error.SqlState,
     code: i32,
     msg: []const u8,
 
@@ -43,8 +46,16 @@ pub const SqlError = struct {
             cursor.allocator.free(errors);
         }
 
+        // If there are more than one error, print them as warning
+        if (errors.len > 1) {
+            std.log.warn("more than one error message:", .{});
+            for (errors) |err| {
+                const msg_len = @divExact(err.error_message.len, 2) - 1;
+                std.log.warn("{s}", .{err.error_message[0..msg_len]});
+            }
+        }
+
         // Duplicate the first error message
-        assert(errors.len == 1);
         const err = errors[0];
         const error_msg_copy = blk: {
             // Provided length seems to be twice the real length. We substract 1
@@ -56,6 +67,7 @@ pub const SqlError = struct {
 
         // Create the SqlError
         return SqlError{
+            .sql_state = Error.OdbcError.fromString(&err.sql_state) catch unreachable,
             .code = err.error_code,
             .msg = error_msg_copy,
         };
@@ -66,7 +78,7 @@ pub const SqlError = struct {
     }
 };
 
-// Caller is responsible of freeing SqlError calling deinit
+/// Returns the last error. Caller is responsible of freeing SqlError calling deinit.
 pub fn getLastError() SqlError {
     const err = lastError orelse std.debug.panic("attempted to get lastError when there isn't any\n", .{});
     lastError = null;
@@ -150,7 +162,10 @@ pub fn querySingleValue(comptime Type: type, comptime statement: []const u8, par
 pub fn insert(comptime StructType: type, comptime table_name: []const u8, values: []const StructType) !usize {
     var cursor = try connection.getCursor(sql_allocator);
     defer cursor.deinit() catch unreachable;
-    return try cursor.insert(StructType, table_name, values);
+    return cursor.insert(StructType, table_name, values) catch |err| {
+        try getAndSetLastError(&cursor);
+        return err;
+    };
 }
 
 pub fn createSavePoint(comptime nombre: []const u8) !void {
