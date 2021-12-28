@@ -1,3 +1,74 @@
+https://www.quora.com/What-is-the-easiest-way-to-store-files-in-the-Oracle-database
+
+## DISPARADORES
+1. rs1. al quitar una tupla de la tabla Autor, comprobar que no tenga canciones subidas. en ese caso, error. MIGUEL
+2. rs2 y rs3. al crear una tupla en la tabla Firma, comprobar que el autor de la canción tenga más de 16 años. DANIEL.
+3. rs4: problema del futuro
+4. rs5: al modificar un contrato, comprobar que la fecha sea mayor o igual que la que ya hay. en caso contrario, error. MIGUEL.
+5. rs6: al modificar un contrato, comprobar que la fecha sea mayor o igual que la sysdate. en caso contrario, error. MIGUEL.
+6. rs7 y rs8: al crear una tupla en la tabla Firma, comprobar que todos los autores de las canciones son el mismo (por el diseño, el autor del contrato es este autor). DAVID M.
+7. rs9: al añadir una tupla a cancion_vendida, comprobar que está asociada a un contrato de autor. DAVID C.
+8. rs10: al añadir una tupla a cancion_promocionada, comprobar que está asociada a un contrato de autor. DAVID C.
+9. adicional1: al insertar una tupla en cancion_sube, la inserta tambien en cancion_activa. DANIEL.
+
+## MENU LOGIN DAVID M.
+1. logearse: pide nickname y contraseña, si están bien pasa a menu principal
+2. registrarse: registra un usuario y vuelve a menu login
+
+## MENU PRINCIPAL
+1. mi cuenta: pasa a menu de cuenta
+2. mis canciones (si es autor)
+3. mis contratos (si es autor)
+4. mis playlists
+5. explorar
+
+# MENU CUENTA MIGUEL.
+visualizar perfil del usuario
+1. añadir amigo: pide nickname y añade
+2. eliminar amigo: pide nickname y elimina
+3. modificar tipo de usuario
+4. darse de baja
+
+# MENU MIS CANCIONES DANIEL.
+lista las canciones del usuario
+1. subir canción
+2. eliminar canción
+
+# MENU MIS CONTRATOS DAVID C.
+lista contratos del usuario
+1. crear contrato de autor
+2. crear contrato de promoción
+3. renovar contrato
+
+# MENU MIS PLAYLISTS DAVID M.
+lista las playlists del usuario
+1. crear playlist
+2. eliminar playlist
+3. modificar playlist: pide id de playlist y pasa a menú modificar playlist
+
+# MENU MODIFICAR PLAYLIST MIGUEL.
+lista canciones de la playlist
+1. añadir canción
+2. quitar canción
+
+# MENU EXPLORAR DANIEL.
+1. listar canciones
+2. listar playlists
+3. acceder a canción: pide id de canción y pasa a MENU CANCIÓN
+4. listar canciones de playlist
+3. visualizar perfil
+
+# MENU CANCIÓN DAVID C.
+mostrar información de canción
+1. reproducir
+2. añadir a playlist
+3. evaluar
+4. si es autor igual ponemos más cosas
+
+
+
+
+
 ~~~mysql
 CREATE TABLE cancion_sube(
     id_cancion INTEGER PRIMARY KEY,
