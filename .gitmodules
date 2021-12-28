@@ -1,0 +1,3 @@
+[submodule "zdb"]
+	path = zdb
+	url = git@github.com:dmateos-ugr/zdb.git
