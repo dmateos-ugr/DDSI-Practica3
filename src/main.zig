@@ -6,19 +6,21 @@ const print = utils.print;
 
 const stdin = std.io.getStdIn().reader();
 
-fn login() !void {
-    var buf_nickname: [consts.max_length.nick]u8 = undefined;
+fn login(buf_nickname: *[consts.max_length.nick]u8) !?[]const u8 {
     var buf_password: [consts.max_length.contrasena]u8 = undefined;
 
     print("Introduce tu nickname:\n", .{});
-    const nickname = try utils.readString(stdin, &buf_nickname);
+    const nickname = try utils.readString(stdin, buf_nickname);
     print("Introduce tu contraseña:\n", .{});
     const password = try utils.readString(stdin, &buf_password);
 
-    var password_hash: [utils.md5_hex_length]u8 = undefined;
-    utils.md5(password, &password_hash);
+    const check = (try sql.querySingleValue(u32, "SELECT check_user(?, ?) FROM dual;", .{ nickname, password })).?;
+    if (check == 0) {
+        print("Error: cuenta inválida\n", .{});
+        return null;
+    }
 
-    // TODO Enviar query a la base de datos, devolver usuario
+    return nickname;
 }
 
 const Usuario = struct {
@@ -47,35 +49,30 @@ fn register() !void {
     const correo = try utils.readString(stdin, &buf_correo);
     print("Introduce tu contraseña:\n", .{});
     const contrasena = try utils.readString(stdin, &buf_contrasena);
-    print("Introduce tu fecha de nacimiento: (TODO)\n", .{});
-    // const fecha = utils.DateTime.fromTimestamp(0);
-    const fecha = sql.SqlDate{
-        .day = 1,
-        .month = 1,
-        .year = 2000,
+    print("Introduce tu fecha de nacimiento (dia): \n", .{});
+    const day = try utils.readNumber(u8, stdin);
+    print("Introduce tu fecha de nacimiento (mes): \n", .{});
+    const month = try utils.readNumber(u8, stdin);
+    print("Introduce tu fecha de nacimiento (año): \n", .{});
+    const year = try utils.readNumber(i16, stdin);
+    const fecha_nacimiento = sql.SqlDate{
+        .day = day,
+        .month = month,
+        .year = year,
     };
 
-    const usuario = Usuario{
-        .nick = nick,
-        .nombre = nombre,
-        .apellidos = correo,
-        .correo = correo,
-        .contrasena = contrasena,
-        .fecha_nacimiento = fecha,
-    };
-
-    // Ejemplo de handleo de errores desde zig, aunque lo ideal es que la función
-    // de SQL devuelva ya un mensaje de error y aquí simplemente se imprima sql_err.msg
-    _ = sql.insert(Usuario, "usuario", &.{usuario}) catch |err| if (err == error.Error) {
+    sql.execute("BEGIN REGISTRAR_USUARIO(?, ?, ?, ?, ?, ?); END;", .{
+        nick,
+        nombre,
+        apellidos,
+        correo,
+        contrasena,
+        fecha_nacimiento,
+    }) catch |err| if (err == error.Error) {
         const sql_err = sql.getLastError();
         defer sql_err.deinit();
-        switch (sql_err.sql_state) {
-            .IntegrityConstraintViolation => {
-                print("Ya existe un usuario con ese nick o correo\n", .{});
-                return;
-            },
-            else => return err,
-        }
+        print("Error creando usuario: {s}\n", .{sql_err.msg});
+        return;
     } else return err;
 
     try sql.commit();
@@ -90,7 +87,7 @@ pub fn main() !void {
     try sql.init(allocator);
     defer sql.deinit();
 
-    // Run mainApp. If a SQL error occurs, get and print the error message.
+    // Run mainApp. If a SQL error occurs, get and print the error message for debugging.
     mainApp() catch |err| switch (err) {
         error.Error => {
             const sql_err = sql.getLastError();
@@ -104,12 +101,22 @@ pub fn main() !void {
 
 pub fn mainApp() !void {
     print("Bienvenido a SpotyCloud!\n", .{});
-    print("1. Logearse\n2. Registrarse\n", .{});
 
-    const input = try utils.readNumber(usize, stdin);
-    switch (input) {
-        1 => try login(),
-        2 => try register(),
-        else => unreachable,
+    var nickname_buf: [consts.max_length.nick]u8 = undefined;
+    var nickname: []const u8 = undefined;
+
+    while (true) {
+        print("\n1. Logearse\n2. Registrarse\n", .{});
+        const input = try utils.readNumber(usize, stdin);
+        switch (input) {
+            1 => {
+                nickname = (try login(&nickname_buf)) orelse continue;
+                break;
+            },
+            2 => try register(),
+            else => unreachable,
+        }
     }
+
+    print("\nBienvenido {s}!\n", .{nickname});
 }
