@@ -105,33 +105,26 @@ pub fn execute(comptime statement: []const u8, params: anytype) !void {
     var cursor = try connection.getCursor(sql_allocator);
     defer cursor.deinit() catch unreachable;
 
-    const sql_query = if (params.len > 0) try std.fmt.allocPrint(sql_allocator, statement, params) else statement;
-    defer if (params.len > 0) sql_allocator.free(sql_query);
-
-    _ = cursor.statement.executeDirect(sql_query) catch |err| {
+    cursor.executeDirectNoResult(params, statement) catch |err| {
         try getAndSetLastError(&cursor);
         return err;
     };
 }
 
-pub fn query(comptime StructType: type, comptime statement: []const u8, params: anytype) ![]StructType {
+pub fn query(comptime StructType: type, statement: []const u8, params: anytype) ![]StructType {
     var cursor = try connection.getCursor(sql_allocator);
     defer cursor.deinit() catch unreachable;
 
-    const sql_query = if (params.len > 0) try std.fmt.allocPrint(sql_allocator, statement, params) else statement;
-    defer if (params.len > 0) sql_allocator.free(sql_query);
-
-    var tuplas = cursor.executeDirect(StructType, .{}, sql_query) catch |err| {
+    var tuplas = cursor.executeDirect(StructType, params, statement) catch |err| {
         try getAndSetLastError(&cursor);
         return err;
     };
     defer tuplas.deinit();
 
-    // TODO para liberar esto tienes que usar el allocator del cursor..
     return tuplas.getAllRows();
 }
 
-pub fn querySingle(comptime StructType: type, comptime statement: []const u8, params: anytype) !?StructType {
+pub fn querySingle(comptime StructType: type, statement: []const u8, params: anytype) !?StructType {
     if (@typeInfo(StructType) != .Struct) {
         @compileError("querySingle: StructType must be a struct, you may want to use querySingleValue instead");
     }
