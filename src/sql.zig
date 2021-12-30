@@ -57,6 +57,14 @@ pub const SqlError = struct {
             }
         }
 
+        if (errors.len == 0) {
+            return SqlError{
+                .sql_state = .Success,
+                .code = 0,
+                .msg = try sql_allocator.dupe(u8, "No hay mensaje de error de SQL"),
+            };
+        }
+
         // Duplicate the first error message
         const err = errors[0];
         const error_msg_copy = blk: {
@@ -108,7 +116,8 @@ pub fn execute(comptime statement: []const u8, params: anytype) !void {
     defer cursor.deinit() catch unreachable;
 
     cursor.executeDirectNoResult(params, statement) catch |err| {
-        try getAndSetLastError(&cursor);
+        if (err == error.Error)
+            try getAndSetLastError(&cursor);
         return err;
     };
 }
@@ -118,7 +127,8 @@ pub fn query(comptime StructType: type, statement: []const u8, params: anytype) 
     defer cursor.deinit() catch unreachable;
 
     var tuplas = cursor.executeDirect(StructType, params, statement) catch |err| {
-        try getAndSetLastError(&cursor);
+        if (err == error.Error)
+            try getAndSetLastError(&cursor);
         return err;
     };
     defer tuplas.deinit();
@@ -158,7 +168,8 @@ pub fn insert(comptime StructType: type, comptime table_name: []const u8, values
     var cursor = try connection.getCursor(sql_allocator);
     defer cursor.deinit() catch unreachable;
     return cursor.insert(StructType, table_name, values) catch |err| {
-        try getAndSetLastError(&cursor);
+        if (err == error.Error)
+            try getAndSetLastError(&cursor);
         return err;
     };
 }
