@@ -3,6 +3,8 @@ const zdb = @import("zdb");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 pub const SqlDate = zdb.odbc.Types.CType.SqlDate;
+pub const SqlBlob = zdb.odbc.Types.CType.SqlBlob;
+//pub const SqlNull = zdb.odbc.Types.CType.SqlNull;
 pub const Error = zdb.odbc.Error;
 
 var sql_allocator: *Allocator = undefined;
