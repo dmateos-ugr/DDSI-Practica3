@@ -20,7 +20,7 @@ const Usuario = struct {
 const Cancion_Sube = struct {
     id_cancion: u32,
     titulo: []const u8,
-    archivo: sql.SqlBlob,
+    archivo: []const u8,
     fecha: sql.SqlDate,
     duracion: u32,
     etiqueta: []const u8,
@@ -113,7 +113,7 @@ fn register() !void {
     print("Usuario creado con éxito!\n", .{});
 }
 
-fn subirCancion() !void {
+fn subirCancion(nick: []const u8) !void {
     var buf_id: u32 = undefined;
     var buf_titulo: [consts.max_length.nombre]u8 = undefined;
     var buf_archivo: [consts.max_length.nombre]u8 = undefined;
@@ -124,49 +124,36 @@ fn subirCancion() !void {
     print("Introduce el título:\n", .{});
     const titulo = try utils.readString(stdin, &buf_titulo);
     print("Introduce la ruta al archivo:\n", .{});
-    const archivo = try utils.readString(stdin, &buf_archivo);
+
+    // TODO: ARREGLAR PARA QUE SE LE PASE BIEN EL ARCHIVO Y CALCULAR DURACION
+    const archivo = "f";
+    const duracion = 69;
+    // --------------------------------------
+
     print("Introduce una etiqueta:\n", .{});
     const etiqueta = try utils.readString(stdin, &buf_etiqueta);
     const fecha = getFechaActual();
 
-    // Calculamos id
-    const id_cancion = bloque: {
-        const max_cid = (try sql.querySingleValue(u32,
-            \\ SELECT MAX(id_cancion)
-            \\ FROM cancion_sube;
-        , .{})) orelse 0;
-        break :bloque max_cid + 1;
-    };
+    sql.execute("BEGIN SUBIR_CANCION(?, ?, ?, ?, ?); END;", .{ titulo, archivo, duracion, etiqueta, nick }) catch |err| if (err == error.Error) {
+        const sql_err = sql.getLastError();
+        defer sql_err.deinit();
+        print("Error subiendo canción: {s}\n", .{sql_err.msg});
+        return;
+    } else return err;
 
-    // sql.execute("BEGIN SUBIR_CANCION(?, ?, ?, ?, ?, ?); END;", .{
-    //     id_cancion,
-    //     titulo,
-    //     sql.SqlNull,
-    //     fecha,
-    //     sql.SqlNull,
-    //     etiqueta,
-    // }) catch |err| if (err == error.Error) {
-    //     const sql_err = sql.getLastError();
-    //     defer sql_err.deinit();
-    //     print("Error creando usuario: {s}\n", .{sql_err.msg});
-    //     return;
-    // } else return err;
+    try sql.commit();
 
-    // try sql.commit();
-
-    print("FALTA HACER LA COSA DE LOS BLOB!!!\n", .{});
+    print("Canción subida con éxito (FALTA HACER LO DEL BLOB)!\n", .{});
 }
 
 fn eliminarCancion() !void {
-    var buf_id: u32 = undefined;
-
     print("Introduce el id:\n", .{});
-    const id = try utils.readNumber(stdin, &buf_id);
+    const id = try utils.readNumber(u8, stdin);
 
     const check = (try sql.querySingleValue(u32, "SELECT id_cancion FROM cancion_sube WHERE id_cancion=?;", .{id})).?;
     if (check == 0) {
         print("Error: canción no encontrada\n", .{});
-        return null;
+        return;
     }
 
     sql.execute("BEGIN ELIMINAR_CANCION(?); END;", .{id}) catch |err| if (err == error.Error) {
@@ -181,14 +168,24 @@ fn eliminarCancion() !void {
     print("Canción eliminada con éxito\n", .{});
 }
 
+fn listarCanciones(buf_nick: []const u8) !void {
+    var lista = try sql.query(Cancion_Sube, "SELECT * FROM CANCION_SUBE WHERE id_cancion IN (SELECT * FROM cancion_activa) AND nick=?", .{buf_nick});
+
+    for (lista) |fila| {
+        print("id: {d}, titulo: {s}", .{ fila.id_cancion, fila.titulo });
+    }
+}
+
 fn menuMiCuenta(nick: []const u8) !void {}
 
 fn menuMisCanciones(nick: []const u8) !void {
     while (true) {
-        print("\n1. Subir Canción\n2. Eliminar Canción\n", .{});
+        print("\n1. Subir Canción\n2. Eliminar Canción\n3. Listar Canciones", .{});
         const input = try utils.readNumber(usize, stdin);
         switch (input) {
-            1 => try subirCancion(),
+            1 => try subirCancion(nick),
+            2 => try eliminarCancion(),
+            3 => try listarCanciones(nick),
             else => unreachable,
         }
     }
