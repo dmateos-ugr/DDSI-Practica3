@@ -129,7 +129,10 @@ pub fn query(comptime StructType: type, statement: []const u8, params: anytype) 
     };
     defer tuplas.deinit();
 
-    return tuplas.getAllRows();
+    return tuplas.getAllRows() catch |err| {
+        try getAndSetLastError(&cursor);
+        return err;
+    };
 }
 
 pub fn querySingle(comptime StructType: type, statement: []const u8, params: anytype) !?StructType {
