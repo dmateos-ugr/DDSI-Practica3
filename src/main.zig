@@ -22,8 +22,8 @@ const Cancion_Sube = struct {
     titulo: []const u8,
     archivo: []const u8,
     fecha: sql.SqlDate,
-    duracion: u32,
     etiqueta: []const u8,
+    nick: []const u8,
 };
 
 const Playlist = struct {
@@ -101,12 +101,12 @@ fn register() !void {
         correo,
         contrasena,
         fecha_nacimiento,
-    }) catch |err| if (err == error.Error) {
-        const sql_err = sql.getLastError();
+    }) catch |err| {
+        const sql_err = sql.getLastError() orelse return err;
         defer sql_err.deinit();
         print("Error creando usuario: {s}\n", .{sql_err.msg});
         return;
-    } else return err;
+    };
 
     try sql.commit();
 
@@ -134,12 +134,12 @@ fn subirCancion(nick: []const u8) !void {
     const etiqueta = try utils.readString(stdin, &buf_etiqueta);
     const fecha = getFechaActual();
 
-    sql.execute("BEGIN SUBIR_CANCION(?, ?, ?, ?, ?); END;", .{ titulo, archivo, duracion, etiqueta, nick }) catch |err| if (err == error.Error) {
-        const sql_err = sql.getLastError();
+    sql.execute("BEGIN SUBIR_CANCION(?, ?, ?, ?, ?); END;", .{ titulo, archivo, duracion, etiqueta, nick }) catch |err| {
+        const sql_err = sql.getLastError() orelse return err;
         defer sql_err.deinit();
         print("Error subiendo canción: {s}\n", .{sql_err.msg});
         return;
-    } else return err;
+    };
 
     try sql.commit();
 
@@ -156,12 +156,12 @@ fn eliminarCancion() !void {
         return;
     }
 
-    sql.execute("BEGIN ELIMINAR_CANCION(?); END;", .{id}) catch |err| if (err == error.Error) {
-        const sql_err = sql.getLastError();
+    sql.execute("BEGIN ELIMINAR_CANCION(?); END;", .{id}) catch |err| {
+        const sql_err = sql.getLastError() orelse return err;
         defer sql_err.deinit();
         print("Error borrando canción: {s}\n", .{sql_err.msg});
         return;
-    } else return err;
+    };
 
     try sql.commit();
 
@@ -281,7 +281,10 @@ pub fn main() !void {
     // Run mainApp. If a SQL error occurs, get and print the error message for debugging.
     mainApp() catch |err| switch (err) {
         error.Error => {
-            const sql_err = sql.getLastError();
+            const sql_err = sql.getLastError() orelse {
+                print("SQL ERROR without error message\n", .{});
+                return err;
+            };
             defer sql_err.deinit();
             print("[SQL ERROR {s}]: {s}\n", .{ sql_err.sql_state, sql_err.msg });
             return err;

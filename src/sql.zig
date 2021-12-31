@@ -38,7 +38,7 @@ pub const SqlError = struct {
     code: i32,
     msg: []const u8,
 
-    fn fromCursor(cursor: *zdb.Cursor) !SqlError {
+    fn fromCursor(cursor: *zdb.Cursor) !?SqlError {
         // Get cursor errors
         const errors = cursor.getErrors();
         defer {
@@ -58,11 +58,7 @@ pub const SqlError = struct {
         }
 
         if (errors.len == 0) {
-            return SqlError{
-                .sql_state = .Success,
-                .code = 0,
-                .msg = try sql_allocator.dupe(u8, "No hay mensaje de error de SQL"),
-            };
+            return null;
         }
 
         // Duplicate the first error message
@@ -89,8 +85,8 @@ pub const SqlError = struct {
 };
 
 /// Returns the last error. Caller is responsible of freeing SqlError calling deinit.
-pub fn getLastError() SqlError {
-    const err = lastError orelse std.debug.panic("attempted to get lastError when there isn't any\n", .{});
+pub fn getLastError() ?SqlError {
+    const err = lastError;
     lastError = null;
     return err;
 }
@@ -101,7 +97,9 @@ pub fn getLastError() SqlError {
 // }
 
 fn getAndSetLastError(cursor: *zdb.Cursor) !void {
-    setLastError(try SqlError.fromCursor(cursor));
+    if (try SqlError.fromCursor(cursor)) |err| {
+        setLastError(err);
+    }
 }
 
 fn setLastError(err: SqlError) void {
@@ -116,8 +114,7 @@ pub fn execute(comptime statement: []const u8, params: anytype) !void {
     defer cursor.deinit() catch unreachable;
 
     cursor.executeDirectNoResult(params, statement) catch |err| {
-        if (err == error.Error)
-            try getAndSetLastError(&cursor);
+        try getAndSetLastError(&cursor);
         return err;
     };
 }
@@ -127,8 +124,7 @@ pub fn query(comptime StructType: type, statement: []const u8, params: anytype) 
     defer cursor.deinit() catch unreachable;
 
     var tuplas = cursor.executeDirect(StructType, params, statement) catch |err| {
-        if (err == error.Error)
-            try getAndSetLastError(&cursor);
+        try getAndSetLastError(&cursor);
         return err;
     };
     defer tuplas.deinit();
@@ -168,8 +164,7 @@ pub fn insert(comptime StructType: type, comptime table_name: []const u8, values
     var cursor = try connection.getCursor(sql_allocator);
     defer cursor.deinit() catch unreachable;
     return cursor.insert(StructType, table_name, values) catch |err| {
-        if (err == error.Error)
-            try getAndSetLastError(&cursor);
+        try getAndSetLastError(&cursor);
         return err;
     };
 }
