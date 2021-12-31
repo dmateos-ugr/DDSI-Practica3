@@ -1,4 +1,5 @@
 const std = @import("std");
+const sql = @import("sql.zig");
 
 pub fn print(comptime format: []const u8, args: anytype) void {
     const stdout = std.io.getStdOut().writer();
@@ -39,6 +40,23 @@ pub fn readNumber(comptime T: type, in: std.fs.File.Reader) !T {
     }
 }
 
+pub fn readBoolYN(in: std.fs.File.Reader) !bool {
+    var buf: [1]u8 = undefined;
+    _ = try readString(in, &buf);
+    return buf[0] == 'y';
+}
+
+/// Caller owns memory and must free it with allocator.free.
+pub fn readFile(path: []const u8, allocator: *std.mem.Allocator) ![]u8 {
+    const file = try std.fs.cwd().openFile(path, .{ .read = true });
+    defer file.close();
+    const size = try file.getEndPos();
+    const buffer = try allocator.alloc(u8, size);
+    const bytes_read = try file.readAll(buffer);
+    std.debug.assert(bytes_read == size);
+    return buffer;
+}
+
 const Md5 = std.crypto.hash.Md5;
 pub const md5_hex_length = Md5.digest_length * 2;
 
@@ -47,6 +65,22 @@ pub fn md5(in: []const u8, out: *[md5_hex_length]u8) void {
     Md5.hash(in, &hash_bytes, .{});
     const hex_formatter = std.fmt.fmtSliceHexLower(&hash_bytes);
     _ = std.fmt.bufPrint(out, "{}", .{hex_formatter}) catch unreachable;
+}
+
+pub fn fmtSqlDate(date: sql.SqlDate) std.fmt.Formatter(fmtSqlDateFn) {
+    // Devuelve un objeto que al intentar imprimirse llamará a fmtSqlDateFn
+    return .{ .data = date };
+}
+
+fn fmtSqlDateFn(
+    date: sql.SqlDate,
+    comptime fmt: []const u8,
+    options: std.fmt.FormatOptions,
+    writer: anytype,
+) !void {
+    _ = fmt;
+    _ = options;
+    try writer.print("{}/{}/{}", .{ date.day, date.month, date.year });
 }
 
 pub const DateTime = struct {

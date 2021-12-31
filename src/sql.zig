@@ -67,8 +67,9 @@ pub const SqlError = struct {
             // Provided length seems to be twice the real length. We substract 1
             // to remove newline character.
             const msg_len = @divExact(err.error_message.len, 2) - 1;
-            const i = if (std.mem.indexOfScalar(u8, err.error_message, ':')) |idx| idx + 2 else 0;
-            break :blk try sql_allocator.dupe(u8, err.error_message[i..msg_len]);
+            const idx1 = if (std.mem.indexOfScalar(u8, err.error_message, ':')) |idx| idx + 2 else 0;
+            const idx2 = std.mem.indexOfScalar(u8, err.error_message, '\n') orelse msg_len;
+            break :blk try sql_allocator.dupe(u8, err.error_message[idx1..idx2]);
         };
 
         // Create the SqlError

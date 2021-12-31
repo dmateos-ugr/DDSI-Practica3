@@ -6,6 +6,8 @@ const print = utils.print;
 
 const stdin = std.io.getStdIn().reader();
 
+const global_allocator = std.heap.page_allocator;
+
 // TODO separar en varios archivos?
 
 const Usuario = struct {
@@ -127,6 +129,11 @@ fn subirCancion(nick: []const u8) !void {
 
     // TODO: ARREGLAR PARA QUE SE LE PASE BIEN EL ARCHIVO Y CALCULAR DURACION
     const archivo = "f";
+
+    // DANI:
+    // const file_contents = try utils.readFile(archivo, global_allocator);
+    // defer global_allocator.free(file_contents);
+
     const duracion = 69;
     // --------------------------------------
 
@@ -150,6 +157,8 @@ fn eliminarCancion() !void {
     print("Introduce el id:\n", .{});
     const id = try utils.readNumber(u8, stdin);
 
+    // DANI: este check mejor lo metes dentro del sql en ELIMINAR_CANCION y que haga
+    // raise_application_error para que nos llegue aquí el mensaje de error en sql_err.msg
     const check = (try sql.querySingleValue(u32, "SELECT id_cancion FROM cancion_sube WHERE id_cancion=?;", .{id})).?;
     if (check == 0) {
         print("Error: canción no encontrada\n", .{});
@@ -170,6 +179,7 @@ fn eliminarCancion() !void {
 
 fn listarCanciones(buf_nick: []const u8) !void {
     var lista = try sql.query(Cancion_Sube, "SELECT * FROM CANCION_SUBE WHERE id_cancion IN (SELECT * FROM cancion_activa) AND nick=?", .{buf_nick});
+    defer sql.getAllocator().free(lista);
 
     for (lista) |fila| {
         print("id: {d}, titulo: {s}", .{ fila.id_cancion, fila.titulo });
@@ -195,6 +205,7 @@ fn menuMisContratos(nick: []const u8) !void {}
 
 fn menuMisPlaylists(nick: []const u8) !void {
     while (true) {
+        print("\n[MIS PLAYLISTS]\n", .{});
         try listarPlaylists(nick);
         print("\n1. Crear playlist\n2. Eliminar playlist\n3. Modificar playlist\n4. Atrás\n", .{});
         const input = try utils.readNumber(usize, stdin);
@@ -208,24 +219,83 @@ fn menuMisPlaylists(nick: []const u8) !void {
     }
 }
 
-fn listarPlaylists(nick: []const u8) !void {}
+fn listarPlaylists(nick: []const u8) !void {
+    const playlists = try sql.query(
+        Playlist,
+        "SELECT * FROM playlists_crea WHERE nick = ?",
+        .{nick},
+    );
+    defer sql.getAllocator().free(playlists);
+
+    for (playlists) |playlist| {
+        print("{d}: {s}, creada el {}\n", .{
+            playlist.id_playlist,
+            playlist.nombre,
+            utils.fmtSqlDate(playlist.fecha_creacion),
+        });
+    }
+}
 
 fn crearPlaylist(nick: []const u8) !void {
-    // TODO no se por que si metes una cadena de longitud mas de 8 se guarda como ¿¿¿¿¿¿¿¿
     print("\nIntroduce nombre de la playlist:\n", .{});
     var buf_nombre_playlist: [consts.max_length.nombre_playlist]u8 = undefined;
     const nombre_playlist = try utils.readString(stdin, &buf_nombre_playlist);
-    try sql.execute("BEGIN crear_playlist(?, ?); END;", .{
+
+    print("Quieres que sea una playlist privada? (y/n)\n", .{});
+    const privada = try utils.readBoolYN(stdin);
+
+    try sql.execute("BEGIN crear_playlist(?, ?, ?); END;", .{
         nombre_playlist,
         nick,
+        @intCast(u32, @boolToInt(privada)),
     });
     try sql.commit();
     print("playlist creada!\n", .{});
 }
 
-fn eliminarPlaylist(nick: []const u8) !void {}
+fn eliminarPlaylist(nick: []const u8) !void {
+    print("\nIntroduce el id de la playlist a eliminar:\n", .{});
+    const id_playlist = try utils.readNumber(u32, stdin);
+    sql.execute("BEGIN eliminar_playlist(?, ?); END;", .{ id_playlist, nick }) catch |err| {
+        const sql_err = sql.getLastError() orelse return err;
+        defer sql_err.deinit();
+        print("Error eliminando playlist: {s}\n", .{sql_err.msg});
+        return;
+    };
+    try sql.commit();
+    print("Playlist eliminada!\n", .{});
+}
 
-fn modificarPlaylist(nick: []const u8) !void {}
+fn modificarPlaylist(nick: []const u8) !void {
+    print("\nIntroduce el id de la playlist a modificar:\n", .{});
+    const id_playlist = try utils.readNumber(u32, stdin);
+
+    // Comprobar que es del usuario
+    const count = try sql.querySingleValue(
+        u32,
+        "SELECT COUNT(*) FROM playlists_crea WHERE nick = ? AND id_playlist = ?;",
+        .{ nick, id_playlist },
+    );
+    if (count.? == 0) {
+        print("Id inválido\n", .{});
+        return;
+    }
+
+    // ESTE MENÚ ES DE MIGUEL
+    while (true) {
+        try listarCancionesPlaylist(id_playlist);
+        print("\n1. Añadir canción\n2. Eliminar canción\n3. Atrás\n", .{});
+        const input = try utils.readNumber(usize, stdin);
+        switch (input) {
+            1 => {},
+            2 => {},
+            3 => break,
+            else => {},
+        }
+    }
+}
+
+fn listarCancionesPlaylist(id_playlist: usize) !void {}
 
 fn menuExplorar(nick: []const u8) !void {}
 
@@ -272,10 +342,11 @@ pub fn mainApp() !void {
 }
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = &gpa.allocator;
+    // var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    // const allocator = &gpa.allocator;
+    // defer _ = gpa.deinit();
 
-    try sql.init(allocator);
+    try sql.init(global_allocator);
     defer sql.deinit();
 
     // Run mainApp. If a SQL error occurs, get and print the error message for debugging.
