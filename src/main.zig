@@ -159,11 +159,12 @@ fn eliminarCancion() !void {
 
     // DANI: este check mejor lo metes dentro del sql en ELIMINAR_CANCION y que haga
     // raise_application_error para que nos llegue aquí el mensaje de error en sql_err.msg
-    const check = (try sql.querySingleValue(u32, "SELECT id_cancion FROM cancion_sube WHERE id_cancion=?;", .{id})).?;
-    if (check == 0) {
-        print("Error: canción no encontrada\n", .{});
-        return;
-    }
+    // SOY DANI: YA LO HE HECHO :)
+    // const check = (try sql.querySingleValue(u32, "SELECT id_cancion FROM cancion_sube WHERE id_cancion=?;", .{id}));
+    // if (check == 0) {
+    //     print("Error: canción no encontrada\n", .{});
+    //     return;
+    // }
 
     sql.execute("BEGIN ELIMINAR_CANCION(?); END;", .{id}) catch |err| {
         const sql_err = sql.getLastError() orelse return err;
@@ -177,12 +178,34 @@ fn eliminarCancion() !void {
     print("Canción eliminada con éxito\n", .{});
 }
 
-fn listarCanciones(buf_nick: []const u8) !void {
-    var lista = try sql.query(Cancion_Sube, "SELECT * FROM CANCION_SUBE WHERE id_cancion IN (SELECT * FROM cancion_activa) AND nick=?", .{buf_nick});
+fn listarCancionesAutor(autor: []const u8) !void {
+    var lista = try sql.query(Cancion_Sube,
+        \\ SELECT * FROM(
+        \\  SELECT * FROM cancion_sube WHERE id_cancion IN (SELECT * FROM cancion_promocionada)
+        \\  UNION
+        \\  SELECT * FROM cancion_sube WHERE id_cancion IN (SELECT * FROM cancion_activa)
+        \\ )
+        \\ WHERE nick = ?; 
+    , .{autor});
     defer sql.getAllocator().free(lista);
 
     for (lista) |fila| {
-        print("id: {d}, titulo: {s}", .{ fila.id_cancion, fila.titulo });
+        print("{d}. {s} - {s}\n", .{ fila.id_cancion, fila.titulo, fila.nick });
+    }
+}
+
+fn listarCanciones() !void {
+    var lista = try sql.query(Cancion_Sube,
+        \\ SELECT * FROM(
+        \\  SELECT * FROM cancion_sube WHERE id_cancion IN (SELECT * FROM cancion_promocionada)
+        \\  UNION
+        \\  SELECT * FROM cancion_sube WHERE id_cancion IN (SELECT * FROM cancion_activa)
+        \\ )
+    , .{});
+    defer sql.getAllocator().free(lista);
+
+    for (lista) |fila| {
+        print("{d}. {s} - {s}\n", .{ fila.id_cancion, fila.titulo, fila.nick });
     }
 }
 
@@ -190,12 +213,13 @@ fn menuMiCuenta(nick: []const u8) !void {}
 
 fn menuMisCanciones(nick: []const u8) !void {
     while (true) {
-        print("\n1. Subir Canción\n2. Eliminar Canción\n3. Listar Canciones", .{});
+        print("\n1. Subir Canción\n2. Eliminar Canción\n3. Listar Canciones\n4. Salir", .{});
         const input = try utils.readNumber(usize, stdin);
         switch (input) {
             1 => try subirCancion(nick),
             2 => try eliminarCancion(),
-            3 => try listarCanciones(nick),
+            3 => try listarCancionesAutor(nick),
+            4 => break,
             else => unreachable,
         }
     }
@@ -206,7 +230,7 @@ fn menuMisContratos(nick: []const u8) !void {}
 fn menuMisPlaylists(nick: []const u8) !void {
     while (true) {
         print("\n[MIS PLAYLISTS]\n", .{});
-        try listarPlaylists(nick);
+        try listarPlaylistsAutor(nick);
         print("\n1. Crear playlist\n2. Eliminar playlist\n3. Modificar playlist\n4. Atrás\n", .{});
         const input = try utils.readNumber(usize, stdin);
         switch (input) {
@@ -219,7 +243,7 @@ fn menuMisPlaylists(nick: []const u8) !void {
     }
 }
 
-fn listarPlaylists(nick: []const u8) !void {
+fn listarPlaylistsAutor(nick: []const u8) !void {
     const playlists = try sql.query(
         Playlist,
         "SELECT * FROM playlists_crea WHERE nick = ?",
@@ -236,6 +260,23 @@ fn listarPlaylists(nick: []const u8) !void {
     }
 }
 
+// TODO: Comprobar que es publica
+fn listarPlaylists() !void {
+    const playlists = try sql.query(
+        Playlist,
+        "SELECT * FROM playlists_crea",
+        .{},
+    );
+    defer sql.getAllocator().free(playlists);
+
+    for (playlists) |playlist| {
+        print("{d}: {s}, creada el {}\n", .{
+            playlist.id_playlist,
+            playlist.nombre,
+            utils.fmtSqlDate(playlist.fecha_creacion),
+        });
+    }
+}
 fn crearPlaylist(nick: []const u8) !void {
     print("\nIntroduce nombre de la playlist:\n", .{});
     var buf_nombre_playlist: [consts.max_length.nombre_playlist]u8 = undefined;
@@ -295,9 +336,74 @@ fn modificarPlaylist(nick: []const u8) !void {
     }
 }
 
+fn accederPerfil() !void {
+    print("Introduce un nickname:\n", .{});
+    var buf_nick: [consts.max_length.nick]u8 = undefined;
+    const nickname = try utils.readString(stdin, &buf_nick);
+
+    const user = (try sql.querySingle(Usuario, "SELECT * FROM usuario WHERE nick=?;", .{nickname})) orelse {
+        print("Error: usuario no encontrado\n", .{});
+        return;
+    };
+
+    print("=== CANCIONES ===\n", .{});
+    try listarCancionesAutor(nickname);
+    print("\n=== PLAYLISTS ===\n", .{});
+    try listarPlaylistsAutor(nickname);
+}
+
+// TODO
 fn listarCancionesPlaylist(id_playlist: usize) !void {}
 
-fn menuExplorar(nick: []const u8) !void {}
+fn accederCancion() !void {
+    // TODO pensar cómo hacer que solo muestre opciones 2 y 3 si es autor. igual que
+    // la funcion login devuelva un Usuario con toda la información?
+    while (true) {
+        print("Introduce el id de la canción.", .{});
+        const input = try utils.readNumber(u32, stdin);
+        const id_cancion = (try sql.querySingleValue(u32, "SELECT * FROM cancion_activa WHERE id_cancion=?;", .{input})) orelse {
+            print("Error: canción no encontrada\n", .{});
+            return;
+        };
+
+        print("AQUI VA EL MENU DE CANCION DE LA CANCION {d}\n", .{id_cancion});
+        break;
+    }
+}
+
+fn accederPlaylists() !void {
+    print("Introduce el id de la playlist.", .{});
+    const input = try utils.readNumber(u32, stdin);
+    const id_playlist = (try sql.querySingleValue(u32, "SELECT * FROM playlist_publica WHERE id_playlist=?;", .{input})) orelse {
+        print("Error: playlist no encontrada\n", .{});
+        return;
+    };
+
+    var lista = try sql.query(Cancion_Sube,
+        \\SELECT * FROM playlist_publica WHERE id_playlist = ?
+    , .{input});
+    defer sql.getAllocator().free(lista);
+
+    for (lista) |fila| {
+        print("{d}. {s} - {s}\n", .{ fila.id_cancion, fila.titulo, fila.nick });
+    }
+}
+
+fn menuExplorar(nick: []const u8) !void {
+    while (true) {
+        print("\n1. Buscar canciones\n2. Buscar playlists\n3. Acceder a canción\n4. Acceder perfil\n5. Acceder a playlist\n6. Salir\n", .{});
+        const input = try utils.readNumber(usize, stdin);
+        switch (input) {
+            1 => try listarCanciones(),
+            2 => try listarPlaylists(),
+            3 => try accederCancion(),
+            4 => try accederPerfil(),
+            5 => try accederPlaylists(),
+            6 => break,
+            else => {},
+        }
+    }
+}
 
 fn menuPrincipal(nick: []const u8) !void {
     // TODO pensar cómo hacer que solo muestre opciones 2 y 3 si es autor. igual que
