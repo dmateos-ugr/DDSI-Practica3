@@ -5,4 +5,5 @@ pub const max_length = struct {
     pub const correo = 40;
     pub const contrasena = 20; // hash is 32
     pub const nombre_playlist = 30;
+    pub const cuenta_banco = 40;
 };

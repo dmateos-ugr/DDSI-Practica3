@@ -35,6 +35,13 @@ const Playlist = struct {
     nick: []const u8,
 };
 
+const Contrato = struct {
+    id_contrato: u32,
+    cuenta_bancaria: []const u8,
+    cantidad_pagada: u32,
+    fecha_caducidad: sql.SqlDate,
+};
+
 fn getFechaActual() sql.SqlDate {
     return bloque: {
         const date = utils.DateTime.fromTimestamp(std.time.timestamp());
@@ -225,7 +232,112 @@ fn menuMisCanciones(nick: []const u8) !void {
     }
 }
 
-fn menuMisContratos(nick: []const u8) !void {}
+fn menuMisContratos(nick: []const u8) !void {
+    while (true) {
+        print("\n[MIS CONTRATOS]\n", .{});
+        try listarContratos(nick);
+        print("\n1. Crear contrato de autor\n2. Crear contrato de promoción\n3. Renovar contrato\n4. Atrás\n", .{});
+        const input = try utils.readNumber(usize, stdin);
+        switch (input) {
+            1 => try crearContratoAutor(),
+            2 => try crearContratoPromocion(),
+            3 => try renovarContrato(),
+            4 => break,
+            else => {},
+        }
+    }
+}
+
+fn listarContratos(nick: []const u8) !void {
+    const contratos_autor = try sql.query(
+        Contrato,
+        "SELECT DISTINCT id_contrato FROM contrato_autor NATURAL JOIN firma NATURAL JOIN cancion_sube WHERE nick = ?",
+        .{nick},
+    );
+    defer sql.getAllocator().free(contratos_autor);
+
+    for (contratos_autor) |autor| {
+        print("Contrato de autor {d}\n", .{
+            autor.id_contrato,
+        });
+    }
+
+    const contratos_promo = try sql.query(
+        Contrato,
+        "SELECT DISTINCT id_contrato, fecha_caducidad FROM contrato_promocion NATURAL JOIN firma NATURAL JOIN cancion_sube WHERE nick = ?",
+        .{nick},
+    );
+    defer sql.getAllocator().free(contratos_promo);
+
+    for (contratos_promo) |promo| {
+        print("Contrato de promoción {d}, fecha de caducidad: {}\n", .{
+            promo.id_contrato,
+            utils.fmtSqlDate(promo.fecha_caducidad),
+        });
+    }
+}
+
+fn crearContratoAutor() !void {
+    print("\nIntroduce cuenta bancaria en la que abonar:\n", .{});
+    var buf_cuenta_banco: [consts.max_length.cuenta_banco]u8 = undefined;
+    const cuenta_banco = try utils.readString(stdin, &buf_cuenta_banco);
+
+    print("\nIntroduce la cantidad a pagar:\n", .{});
+    const cantidad_pagar = try utils.readNumber(u32, stdin);
+
+    try sql.execute("BEGIN crear_contrato_autor(?, ?); END;", .{
+        cuenta_banco,
+        cantidad_pagar,
+    });
+    try sql.commit();
+    print("\nContrato de autor creado!\n", .{});
+}
+
+fn crearContratoPromocion() !void {
+    print("\nIntroduce cuenta bancaria en la que abonar:\n", .{});
+    var buf_cuenta_banco: [consts.max_length.cuenta_banco]u8 = undefined;
+    const cuenta_banco = try utils.readString(stdin, &buf_cuenta_banco);
+
+    print("\nIntroduce la cantidad a pagar:\n", .{});
+    const cantidad_pagar = try utils.readNumber(u32, stdin);
+
+    print("Introduce la fecha de vencimiento del contrato (dia): \n", .{});
+    const day = try utils.readNumber(u8, stdin);
+    print("Introduce la fecha de vencimiento del contrato (mes): \n", .{});
+    const month = try utils.readNumber(u8, stdin);
+    print("Introduce la fecha de vencimiento del contrato (año): \n", .{});
+    const year = try utils.readNumber(i16, stdin);
+    const fecha_vencimiento = sql.SqlDate{
+        .day = day,
+        .month = month,
+        .year = year,
+    };
+
+    try sql.execute("BEGIN crear_contrato_promocion(?, ?); END;", .{ cuenta_banco, cantidad_pagar, fecha_vencimiento });
+    try sql.commit();
+    print("contrato de promocion creado!\n", .{});
+}
+
+fn renovarContrato() !void {
+    print("\nIntroduce el indentificador del contrato que desea renovar:\n", .{});
+    const id_cont = try utils.readNumber(u32, stdin);
+
+    print("Introduce la fecha de renovación del contrato (dia): \n", .{});
+    const day = try utils.readNumber(u8, stdin);
+    print("Introduce la fecha de renovación del contrato (mes): \n", .{});
+    const month = try utils.readNumber(u8, stdin);
+    print("Introduce la fecha de renovación del contrato (año): \n", .{});
+    const year = try utils.readNumber(i16, stdin);
+    const fecha_renovacion = sql.SqlDate{
+        .day = day,
+        .month = month,
+        .year = year,
+    };
+
+    try sql.execute("BEGIN renovar_contrato(?, ?); END;", .{ id_cont, fecha_renovacion });
+    try sql.commit();
+    print("contrato renovado!\n", .{});
+}
 
 fn menuMisPlaylists(nick: []const u8) !void {
     while (true) {
@@ -334,6 +446,40 @@ fn modificarPlaylist(nick: []const u8) !void {
             else => {},
         }
     }
+}
+
+fn menuCancion(id_cancion: u32) !void {
+    var cancion = try sql.query(Cancion_Sube, "SELECT * FROM CANCION_SUBE WHERE id_cancion=?", .{id_cancion});
+    defer sql.getAllocator().free(cancion);
+
+    print("id: {d}\ntitulo: {s}\narchivo: {s}\nfecha: {}\netiqueta: {s}\nnick: {s}", .{ cancion.id_cancion, cancion.titulo, cancion.archivo, cancion.fecha, cancion.etiqueta, cancion.nick });
+
+    while (true) {
+        print("\n1. Reproducir\n2. Añadir a playlist\n3. Evaluar\n4. Atrás\n", .{});
+        const input = try utils.readNumber(usize, stdin);
+        switch (input) {
+            1 => try reproducir(id_cancion),
+            2 => try anadirAPlaylist(id_cancion),
+            3 => try evaluar(id_cancion),
+            4 => break,
+            else => {},
+        }
+    }
+}
+
+fn reproducir(id_cancion: u32) !void {}
+
+fn anadirAPlaylist(id_cancion: u32) !void {}
+
+fn evaluar(id_cancion: u32) !void {
+    print("\nIntroduce la evaluación de la canción:\n", .{});
+    const eval = try utils.readNumber(u32, stdin);
+
+    var eval_actual = try sql.query(Cancion_Sube, "SELECT evaluacion FROM CANCION_SUBE WHERE id_cancion=?", .{id_cancion});
+    defer sql.getAllocator().free(eval_actual);
+
+    var aux = try sql.query(Cancion_Sube, "UPDATE CANCION_SUBE SET evaluacion = ? WHERE id_cancion=?", .{ eval, id_cancion });
+    defer sql.getAllocator().free(aux);
 }
 
 fn accederPerfil() !void {
