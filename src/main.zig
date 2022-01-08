@@ -219,13 +219,13 @@ fn listarCanciones() !void {
 fn addAmigo(nick: []const u8) !void {
     var buf_amigo: [consts.max_length.nick]u8 = undefined;
 
-    print("\nIntroduce el nickname del usuario del que te quieres hacer amigo.", .{});
+    print("\nIntroduce el nickname del usuario al que quieres añadir como amigo.", .{});
     const amigo = try utils.readString(stdin, &buf_amigo);
 
     sql.execute("BEGIN ADD_AMIGO(?, ?); END;", .{ nick, amigo }) catch |err| {
         const sql_err = sql.getLastError() orelse return err;
         defer sql_err.deinit();
-        print("Error creando relación de amistad: {s}\n", .{sql_err.msg});
+        print("Error añadiendo amigo: {s}\n", .{sql_err.msg});
         return;
     };
 
@@ -234,7 +234,23 @@ fn addAmigo(nick: []const u8) !void {
     print("Ya sois amigos!\n", .{});
 }
 
-fn eliminarAmigo(nick: []const u8) !void {}
+fn eliminarAmigo(nick: []const u8) !void {
+    var buf_migo: [consts.max_length.nick]u8 = undefined;
+
+    print("\nIntroduce el nickname del usuario al que quieres eliminar como amigo.", .{});
+    const migo = try utils.readString(stdin, &buf_migo);
+
+    sql.execute("BEGIN ELIMINAR_AMIGO(?, ?); END;", .{ nick, migo }) catch |err| {
+        const sql_err = sql.getLastError() orelse return err;
+        defer sql_err.deinit();
+        print("Error eliminando amigo: {s}\n", .{sql_err.msg});
+        return;
+    };
+
+    try sql.commit();
+
+    print("Ya no sois amigos\n", .{});
+}
 
 fn modificarTipo(nick: []const u8) !void {}
 
