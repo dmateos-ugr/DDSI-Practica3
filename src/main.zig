@@ -38,7 +38,15 @@ const Playlist = struct {
 const Contrato = struct {
     id_contrato: u32,
     cuenta_bancaria: []const u8,
-    cantidad_pagada: u32,
+    cantidad_pagada: f32,
+    fecha_creacion: sql.SqlDate,
+};
+
+const Contrato_Promocion = struct {
+    id_contrato: u32,
+    cuenta_bancaria: []const u8,
+    cantidad_pagada: f32,
+    fecha_creacion: sql.SqlDate,
     fecha_caducidad: sql.SqlDate,
 };
 
@@ -304,7 +312,10 @@ fn menuMisContratos(nick: []const u8) !void {
 fn listarContratos(nick: []const u8) !void {
     const contratos_autor = try sql.query(
         Contrato,
-        "SELECT DISTINCT id_contrato FROM contrato_autor NATURAL JOIN firma NATURAL JOIN cancion_sube WHERE nick = ?",
+        \\SELECT id_contrato, cuenta_bancaria, cantidad_pagada, fecha_creacion
+        \\FROM contrato_autor NATURAL JOIN contrato NATURAL JOIN firma NATURAL JOIN cancion_sube
+        \\WHERE nick = ?;
+    ,
         .{nick},
     );
     defer sql.getAllocator().free(contratos_autor);
@@ -316,8 +327,11 @@ fn listarContratos(nick: []const u8) !void {
     }
 
     const contratos_promo = try sql.query(
-        Contrato,
-        "SELECT DISTINCT id_contrato, fecha_caducidad FROM contrato_promocion NATURAL JOIN firma NATURAL JOIN cancion_sube WHERE nick = ?",
+        Contrato_Promocion,
+        \\SELECT id_contrato, cuenta_bancaria, cantidad_pagada, fecha_creacion, fecha_caducidad
+        \\FROM contrato_promocion NATURAL JOIN contrato NATURAL JOIN firma NATURAL JOIN cancion_sube
+        \\WHERE nick = ?;
+    ,
         .{nick},
     );
     defer sql.getAllocator().free(contratos_promo);
@@ -325,7 +339,7 @@ fn listarContratos(nick: []const u8) !void {
     for (contratos_promo) |promo| {
         print("Contrato de promoción {d}, fecha de caducidad: {}\n", .{
             promo.id_contrato,
-            utils.fmtSqlDate(promo.fecha_caducidad),
+            utils.fmtSqlDate(promo.fecha_creacion),
         });
     }
 }
@@ -338,12 +352,17 @@ fn crearContratoAutor() !void {
     print("\nIntroduce la cantidad a pagar:\n", .{});
     const cantidad_pagar = try utils.readNumber(u32, stdin);
 
+    // HACER SAVEPOINT
     try sql.execute("BEGIN crear_contrato_autor(?, ?); END;", .{
         cuenta_banco,
         cantidad_pagar,
     });
-    try sql.commit();
     print("\nContrato de autor creado!\n", .{});
+
+    // HACER MENU DE INTRODUCCION DE CANCIONES
+    // LISTAR CANCIONES DE AUTOR, PEDIR CANCIONES Y POR CADA CANCIÓN
+    // LLAMAR A UNA FUNCION PARA AÑADIR TUPLA A FIRMA
+    try sql.commit();
 }
 
 // TODO: seleccionar canciones a promocionar
@@ -367,7 +386,11 @@ fn crearContratoPromocion() !void {
         .year = year,
     };
 
-    try sql.execute("BEGIN crear_contrato_promocion(?, ?); END;", .{ cuenta_banco, cantidad_pagar, fecha_vencimiento });
+    try sql.execute("BEGIN crear_contrato_promocion(?, ?, ?); END;", .{
+        cuenta_banco,
+        cantidad_pagar,
+        fecha_vencimiento,
+    });
     try sql.commit();
     print("contrato de promocion creado!\n", .{});
 }
