@@ -216,7 +216,44 @@ fn listarCanciones() !void {
     }
 }
 
-fn menuMiCuenta(nick: []const u8) !void {}
+fn addAmigo(nick: []const u8) !void {
+    var buf_amigo: [consts.max_length.nick]u8 = undefined;
+
+    print("\nIntroduce el nickname del usuario del que te quieres hacer amigo.", .{});
+    const amigo = try utils.readString(stdin, &buf_amigo);
+
+    sql.execute("BEGIN ADD_AMIGO(?, ?); END;", .{ nick, amigo }) catch |err| {
+        const sql_err = sql.getLastError() orelse return err;
+        defer sql_err.deinit();
+        print("Error creando relación de amistad: {s}\n", .{sql_err.msg});
+        return;
+    };
+
+    try sql.commit();
+
+    print("Ya sois amigos!\n", .{});
+}
+
+fn eliminarAmigo(nick: []const u8) !void {}
+
+fn modificarTipo(nick: []const u8) !void {}
+
+fn darBaja(nick: []const u8) !void {}
+
+fn menuMiCuenta(nick: []const u8) !void {
+    while (true) {
+        print("\n1. Añadir amigo\n2. Eliminar amigo\n3. Modificar tipo de usuario\n4. Darse de baja\n5. Salir", .{});
+        const input = try utils.readNumber(usize, stdin);
+        switch (input) {
+            1 => try addAmigo(nick),
+            2 => try eliminarAmigo(nick),
+            3 => try modificarTipo(nick),
+            4 => try darBaja(nick),
+            5 => break,
+            else => unreachable,
+        }
+    }
+}
 
 fn menuMisCanciones(nick: []const u8) !void {
     while (true) {
@@ -276,7 +313,7 @@ fn listarContratos(nick: []const u8) !void {
         });
     }
 }
-
+// TODO: seleccionar canciones a vender
 fn crearContratoAutor() !void {
     print("\nIntroduce cuenta bancaria en la que abonar:\n", .{});
     var buf_cuenta_banco: [consts.max_length.cuenta_banco]u8 = undefined;
@@ -293,6 +330,7 @@ fn crearContratoAutor() !void {
     print("\nContrato de autor creado!\n", .{});
 }
 
+// TODO: seleccionar canciones a promocionar
 fn crearContratoPromocion() !void {
     print("\nIntroduce cuenta bancaria en la que abonar:\n", .{});
     var buf_cuenta_banco: [consts.max_length.cuenta_banco]u8 = undefined;
