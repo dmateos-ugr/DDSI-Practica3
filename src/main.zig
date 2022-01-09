@@ -245,8 +245,6 @@ fn addAmigo(nick: []const u8) !void {
 }
 
 fn eliminarAmigo(nick: []const u8) !void {
-    // TODO: mostrar lista de amigos actuales?
-
     var buf_migo: [consts.max_length.nick]u8 = undefined;
 
     print("\nIntroduce el nickname del usuario al que quieres eliminar como amigo.", .{});
@@ -373,7 +371,7 @@ fn menuMiCuenta(nick: []const u8) !void {
     print("\n", .{});
 
     while (true) {
-        print("\n1. Añadir amigo\n2. Eliminar amigo\n3. Modificar tipo de usuario\n4. Darse de baja\n5. Salir\n", .{});
+        print("\n1. Añadir amigo\n2. Eliminar amigo\n3. Modificar tipo de usuario\n4. Darse de baja\n5. Atrás\n", .{});
         const input = try utils.readNumber(usize, stdin);
         switch (input) {
             1 => try addAmigo(nick),
@@ -604,6 +602,38 @@ fn eliminarPlaylist(nick: []const u8) !void {
     print("Playlist eliminada!\n", .{});
 }
 
+fn addCancionPlaylist(id_playlist: u32) !void {
+    print("\nIntroduce el id de la cancion a añadir:\n", .{});
+    const id_cancion = try utils.readNumber(u32, stdin);
+
+    sql.execute("BEGIN ADD_CANCION_PLAYLIST(?, ?); END;", .{ id_cancion, id_playlist }) catch |err| {
+        const sql_err = sql.getLastError() orelse return err;
+        defer sql_err.deinit();
+        print("Error añadiendo canción a la playlist: {s}\n", .{sql_err.msg});
+        return;
+    };
+
+    try sql.commit();
+
+    print("Cacnión añadida.\n", .{});
+}
+
+fn eliminarCancionPlaylist(id_playlist: u32) !void {
+    print("\nIntroduce el id de la cancion a eliminar:\n", .{});
+    const id_cancion = try utils.readNumber(u32, stdin);
+
+    sql.execute("BEGIN ELIMINAR_CANCION_PLAYLIST(?, ?); END;", .{ id_cancion, id_playlist }) catch |err| {
+        const sql_err = sql.getLastError() orelse return err;
+        defer sql_err.deinit();
+        print("Error eliminando canción de la playlist: {s}\n", .{sql_err.msg});
+        return;
+    };
+
+    try sql.commit();
+
+    print("Cacnión eliminada.\n", .{});
+}
+
 fn modificarPlaylist(nick: []const u8) !void {
     print("\nIntroduce el id de la playlist a modificar:\n", .{});
     const id_playlist = try utils.readNumber(u32, stdin);
@@ -625,8 +655,8 @@ fn modificarPlaylist(nick: []const u8) !void {
         print("\n1. Añadir canción\n2. Eliminar canción\n3. Atrás\n", .{});
         const input = try utils.readNumber(usize, stdin);
         switch (input) {
-            1 => {},
-            2 => {},
+            1 => try addCancionPlaylist(id_playlist),
+            2 => try eliminarCancionPlaylist(id_playlist),
             3 => break,
             else => {},
         }
