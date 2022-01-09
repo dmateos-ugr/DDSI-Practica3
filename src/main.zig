@@ -82,7 +82,7 @@ fn login(buf_nickname: *[consts.max_length.nick]u8) !?[]const u8 {
 }
 
 /// Pide los datos y registra un usuario
-fn register() !void {
+fn register() !?[]const u8 {
     var buf_nick: [consts.max_length.nick]u8 = undefined;
     var buf_nombre: [consts.max_length.nombre]u8 = undefined;
     var buf_apellidos: [consts.max_length.apellidos]u8 = undefined;
@@ -122,12 +122,14 @@ fn register() !void {
         const sql_err = sql.getLastError() orelse return err;
         defer sql_err.deinit();
         print("Error creando usuario: {s}\n", .{sql_err.msg});
-        return;
+        return null;
     };
 
     try sql.commit();
 
     print("Usuario creado con éxito!\n", .{});
+
+    return nick;
 }
 
 fn subirCancion(nick: []const u8) !void {
@@ -765,7 +767,10 @@ pub fn mainApp() !void {
                 nickname = (try login(&nickname_buf)) orelse continue;
                 break;
             },
-            2 => try register(),
+            2 => {
+                nickname = (try register()) orelse continue;
+                break;
+            },
             else => {},
         }
     }
