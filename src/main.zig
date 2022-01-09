@@ -243,6 +243,8 @@ fn addAmigo(nick: []const u8) !void {
 }
 
 fn eliminarAmigo(nick: []const u8) !void {
+    // TODO: mostrar lista de amigos actuales?
+
     var buf_migo: [consts.max_length.nick]u8 = undefined;
 
     print("\nIntroduce el nickname del usuario al que quieres eliminar como amigo.", .{});
@@ -260,13 +262,116 @@ fn eliminarAmigo(nick: []const u8) !void {
     print("Ya no sois amigos\n", .{});
 }
 
-fn modificarTipo(nick: []const u8) !void {}
+fn modificarTipo(nick: []const u8) !void {
+    const count = try sql.querySingleValue(u32,
+        \\ SELECT COUNT(*)
+        \\ FROM autor
+        \\ WHERE nick = ?;
+    , .{nick});
+    const esAutor = count.? == 1;
 
-fn darBaja(nick: []const u8) !void {}
+    // Creo que me podría ahorrar código aquí pero no me atrevo a liarla
+    if (esAutor) {
+        print("\nActualmente su tipo es: {s}", .{"Autor"});
+        print("\nVa a cambiar su tipo a {s}", .{"Usuario"});
+        print("\nSi ya ha subido canciones, no puede cambiar a usuario", .{});
+
+        print("\nSeguro que quieres proceder? (y/n)", .{});
+        const seguro = try utils.readBoolYN(stdin);
+
+        if (seguro) {
+            sql.execute("BEGIN MODIFICAR_TIPO(?, ?); END;", .{ nick, count.? }) catch |err| {
+                const sql_err = sql.getLastError() orelse return err;
+                defer sql_err.deinit();
+                print("Error modificando tipo: {s}\n", .{sql_err.msg});
+                return;
+            };
+
+            try sql.commit();
+
+            print("\nHa dejado de ser autor", .{});
+        }
+    } else {
+        print("\nActualmente su tipo es: {s}", .{"Usuario"});
+        print("\nVa a cambiar su tipo a {s}", .{"Autor"});
+        print("\nCuando suba canciones, no podrá revertir el cambio", .{});
+
+        print("\nSeguro que quieres proceder? (y/n)", .{});
+        const seguro = try utils.readBoolYN(stdin);
+
+        if (seguro) {
+            sql.execute("BEGIN MODIFICAR_TIPO(?, ?); END;", .{ nick, count.? }) catch |err| {
+                const sql_err = sql.getLastError() orelse return err;
+                defer sql_err.deinit();
+                print("Error modificando tipo: {s}\n", .{sql_err.msg});
+                return;
+            };
+
+            try sql.commit();
+
+            print("\nAhora es autor", .{});
+        }
+    }
+}
+
+fn darBaja(nick: []const u8) !void {
+    print("\nEsto dará de baja su cuenta de forma permanente. Su cuenta, sus canciones y listas no se mostrarán.", .{});
+    print("\nSi tiene canciones promocionadas, acabará su promoción.", .{});
+    print("\nPara recuperarla, tendrá que contactar con un administrador.", .{});
+    print("\nEsta acción hará que salga de la aplicación", .{});
+
+    print("\nSeguro que quieres proceder? (y/n)", .{});
+    const seguro = try utils.readBoolYN(stdin);
+
+    if (seguro) {
+        sql.execute("BEGIN DESACTIVAR_USUARIO(?); END;", .{nick}) catch |err| {
+            const sql_err = sql.getLastError() orelse return err;
+            defer sql_err.deinit();
+            print("Error modificando tipo: {s}\n", .{sql_err.msg});
+            return;
+        };
+
+        try sql.commit();
+
+        std.os.exit(0);
+    }
+}
 
 fn menuMiCuenta(nick: []const u8) !void {
+    print("\nMI CUENTA", .{});
+
+    const user_data = (try sql.querySingle(Usuario,
+        \\ SELECT * FROM USUARIO
+        \\  WHERE nick = ?;
+    , .{nick})) orelse unreachable;
+
+    print("\nNick: {s}", .{user_data.nick});
+    print("\nNombre: {s}", .{user_data.nombre});
+    print("\nApellidos: {s}", .{user_data.apellidos});
+    print("\nCorreo: {s}", .{user_data.correo});
+    print("\nFecha de nacimiento: {}/{}/{}\n", .{ user_data.fecha_nacimiento.year, user_data.fecha_nacimiento.month, user_data.fecha_nacimiento.day });
+
+    print("\nLista de amigos:", .{});
+
+    var lista_amigos = try sql.query(Usuario,
+        \\ ((SELECT NICK, NOMBRE, APELLIDOS, CORREO, CONTRASENA, FECHA_NACIMIENTO
+        \\  FROM USUARIO u, (SELECT * FROM AMISTARSE WHERE (nick1 = ? OR nick2 = ?)) am
+        \\  WHERE u.nick = am.nick1 OR u.nick = am.nick2)
+        \\ MINUS
+        \\ (SELECT * FROM USUARIO WHERE nick = ?))
+        \\ MINUS
+        \\ (SELECT * FROM USUARIO_NO_ACTIVO NATURAL JOIN USUARIO);
+    , .{ nick, nick, nick });
+    defer sql.getAllocator().free(lista_amigos);
+
+    for (lista_amigos) |fila| {
+        print("\n{s}", .{fila.nick});
+    }
+
+    print("\n", .{});
+
     while (true) {
-        print("\n1. Añadir amigo\n2. Eliminar amigo\n3. Modificar tipo de usuario\n4. Darse de baja\n5. Salir", .{});
+        print("\n1. Añadir amigo\n2. Eliminar amigo\n3. Modificar tipo de usuario\n4. Darse de baja\n5. Salir\n", .{});
         const input = try utils.readNumber(usize, stdin);
         switch (input) {
             1 => try addAmigo(nick),
