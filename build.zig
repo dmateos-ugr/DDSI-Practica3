@@ -18,6 +18,8 @@ pub fn build(b: *std.build.Builder) void {
     const exe = b.addExecutable("spotycloud", "src/main.zig");
     exe.setTarget(target);
     exe.setBuildMode(mode);
+    exe.linkSystemLibrary("SDL2");
+    exe.linkSystemLibrary("SDL2_mixer");
     exe.install();
 
     // ZDB

@@ -1,5 +1,6 @@
 const std = @import("std");
 const sql = @import("sql.zig");
+const Allocator = std.mem.Allocator;
 
 pub fn print(comptime format: []const u8, args: anytype) void {
     const stdout = std.io.getStdOut().writer();
@@ -47,7 +48,7 @@ pub fn readBoolYN(in: std.fs.File.Reader) !bool {
 }
 
 /// Caller owns memory and must free it with allocator.free.
-pub fn readFile(path: []const u8, allocator: *std.mem.Allocator) ![]u8 {
+pub fn readFile(allocator: *Allocator, path: []const u8) ![]u8 {
     const file = try std.fs.cwd().openFile(path, .{ .read = true });
     defer file.close();
     const size = try file.getEndPos();
@@ -55,6 +56,70 @@ pub fn readFile(path: []const u8, allocator: *std.mem.Allocator) ![]u8 {
     const bytes_read = try file.readAll(buffer);
     std.debug.assert(bytes_read == size);
     return buffer;
+}
+
+/// Returns URL to uploaded file. Caller owns returned memory and must free
+/// it with allocator.free.
+pub fn uploadFile(allocator: *Allocator, path: []const u8) ![]u8 {
+    // Somos unos vagos asi que ejecutamos curl y que lo haga él todo
+    try std.fs.cwd().access(path, .{ .read = true });
+
+    const param = try std.fmt.allocPrint(allocator, "files[]=@{s}", .{path});
+    defer allocator.free(param);
+
+    var process = try std.ChildProcess.init(&.{
+        "curl",
+        "--silent",
+        "--output",
+        "/dev/null",
+        "-F",
+        param,
+        "https://mailboxdrive.com/php/upload.php",
+    }, allocator);
+    defer process.deinit();
+
+    const exit_status = try process.spawnAndWait();
+    switch (exit_status) {
+        .Exited => |code| {
+            if (code != 0) {
+                std.log.warn("curl finished with code {}\n", .{code});
+                return error.CurlFailed;
+            }
+        },
+        else => unreachable,
+    }
+
+    const url = try std.fmt.allocPrint(
+        allocator,
+        "https://www.mboxdrive.com/{s}",
+        .{std.fs.path.basename(path)},
+    );
+    return url;
+}
+
+/// Downloads file from `url` and places it at `output_path`.
+pub fn downloadFile(allocator: *Allocator, url: []const u8, output_path: []const u8) !void {
+    // Somos unos vagos asi que ejecutamos curl y que lo haga él todo
+    var process = try std.ChildProcess.init(&.{
+        "curl",
+        // "--silent",
+        "--no-progress-meter",
+        "--output",
+        output_path,
+        url,
+    }, allocator);
+    defer process.deinit();
+
+    const exit_status = try process.spawnAndWait();
+    switch (exit_status) {
+        .Exited => |code| {
+            if (code != 0) {
+                std.log.warn("curl finished with code {}\n", .{code});
+                return error.CurlFailed;
+            }
+        },
+        else => unreachable,
+    }
 }
 
 const Md5 = std.crypto.hash.Md5;

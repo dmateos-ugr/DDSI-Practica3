@@ -6,4 +6,7 @@ pub const max_length = struct {
     pub const contrasena = 20; // hash is 32
     pub const nombre_playlist = 30;
     pub const cuenta_banco = 40;
+    pub const titulo = 30;
+    pub const archivo_enlace = 100;
+    pub const etiqueta = 30;
 };

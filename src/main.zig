@@ -2,7 +2,10 @@ const std = @import("std");
 const sql = @import("sql.zig");
 const utils = @import("utils.zig");
 const consts = @import("consts.zig");
+const music = @import("music.zig");
 const print = utils.print;
+
+const carpeta_musica_path = "music";
 
 const stdin = std.io.getStdIn().reader();
 
@@ -22,7 +25,7 @@ const Usuario = struct {
 const Cancion_Sube = struct {
     id_cancion: u32,
     titulo: []const u8,
-    archivo: []const u8,
+    archivo_enlace: []const u8,
     fecha: sql.SqlDate,
     etiqueta: []const u8,
     nick: []const u8,
@@ -133,32 +136,29 @@ fn register() !?[]const u8 {
 }
 
 fn subirCancion(nick: []const u8) !void {
-    var buf_id: u32 = undefined;
-    var buf_titulo: [consts.max_length.nombre]u8 = undefined;
-    var buf_archivo: [consts.max_length.nombre]u8 = undefined;
-    var buf_fecha: sql.SqlDate = undefined;
-    var buf_duracion: u32 = undefined;
-    var buf_etiqueta: [consts.max_length.nombre]u8 = undefined;
+    var buf_titulo: [consts.max_length.titulo]u8 = undefined;
+    var buf_archivo_ruta: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var buf_etiqueta: [consts.max_length.etiqueta]u8 = undefined;
 
     print("Introduce el título:\n", .{});
     const titulo = try utils.readString(stdin, &buf_titulo);
+
     print("Introduce la ruta al archivo:\n", .{});
-
-    // TODO: ARREGLAR PARA QUE SE LE PASE BIEN EL ARCHIVO Y CALCULAR DURACION
-    const archivo = "f";
-
-    // DANI:
-    // const file_contents = try utils.readFile(archivo, global_allocator);
-    // defer global_allocator.free(file_contents);
-
-    const duracion = 69;
-    // --------------------------------------
+    const archivo_ruta = try utils.readString(stdin, &buf_archivo_ruta);
+    print("Subiendo archivo...\n", .{});
+    const archivo_enlace = utils.uploadFile(global_allocator, archivo_ruta) catch |err| {
+        print("Ha ocurrido un error subiendo el archivo: {}\n", .{err});
+        return;
+    };
+    defer global_allocator.free(archivo_enlace);
 
     print("Introduce una etiqueta:\n", .{});
     const etiqueta = try utils.readString(stdin, &buf_etiqueta);
-    const fecha = getFechaActual();
 
-    sql.execute("BEGIN SUBIR_CANCION(?, ?, ?, ?, ?); END;", .{ titulo, archivo, duracion, etiqueta, nick }) catch |err| {
+    sql.execute(
+        "BEGIN SUBIR_CANCION(?, ?, ?, ?); END;",
+        .{ titulo, archivo_enlace, etiqueta, nick },
+    ) catch |err| {
         const sql_err = sql.getLastError() orelse return err;
         defer sql_err.deinit();
         print("Error subiendo canción: {s}\n", .{sql_err.msg});
@@ -167,7 +167,7 @@ fn subirCancion(nick: []const u8) !void {
 
     try sql.commit();
 
-    print("Canción subida con éxito (FALTA HACER LO DEL BLOB)!\n", .{});
+    print("Canción subida con éxito!\n", .{});
 }
 
 fn eliminarCancion() !void {
@@ -388,7 +388,7 @@ fn menuMiCuenta(nick: []const u8) !void {
 
 fn menuMisCanciones(nick: []const u8) !void {
     while (true) {
-        print("\n1. Subir Canción\n2. Eliminar Canción\n3. Listar Canciones\n4. Salir", .{});
+        print("\n1. Subir Canción\n2. Eliminar Canción\n3. Listar Canciones\n4. Salir\n", .{});
         const input = try utils.readNumber(usize, stdin);
         switch (input) {
             1 => try subirCancion(nick),
@@ -573,6 +573,7 @@ fn listarPlaylists() !void {
         });
     }
 }
+
 fn crearPlaylist(nick: []const u8) !void {
     print("\nIntroduce nombre de la playlist:\n", .{});
     var buf_nombre_playlist: [consts.max_length.nombre_playlist]u8 = undefined;
@@ -633,16 +634,23 @@ fn modificarPlaylist(nick: []const u8) !void {
 }
 
 fn menuCancion(id_cancion: u32) !void {
-    var cancion = try sql.query(Cancion_Sube, "SELECT * FROM CANCION_SUBE WHERE id_cancion=?", .{id_cancion});
-    defer sql.getAllocator().free(cancion);
+    // Precondición: existe una canción con ese id
+    const cancion = (try sql.querySingle(
+        Cancion_Sube,
+        "SELECT * FROM cancion_sube WHERE id_cancion=?",
+        .{id_cancion},
+    )).?;
 
-    print("id: {d}\ntitulo: {s}\narchivo: {s}\nfecha: {}\netiqueta: {s}\nnick: {s}", .{ cancion.id_cancion, cancion.titulo, cancion.archivo, cancion.fecha, cancion.etiqueta, cancion.nick });
+    print(
+        "id: {}\ntitulo: {s}\n\nfecha: {}\netiqueta: {s}\nnick: {s}\n",
+        .{ cancion.id_cancion, cancion.titulo, utils.fmtSqlDate(cancion.fecha), cancion.etiqueta, cancion.nick },
+    );
 
     while (true) {
         print("\n1. Reproducir\n2. Añadir a playlist\n3. Evaluar\n4. Atrás\n", .{});
         const input = try utils.readNumber(usize, stdin);
         switch (input) {
-            1 => try reproducir(id_cancion),
+            1 => try reproducirCancion(id_cancion),
             2 => try anadirAPlaylist(id_cancion),
             3 => try evaluar(id_cancion),
             4 => break,
@@ -651,7 +659,60 @@ fn menuCancion(id_cancion: u32) !void {
     }
 }
 
-fn reproducir(id_cancion: u32) !void {}
+fn reproducirCancion(id_cancion: u32) !void {
+    // Precondición: id_cancion existe
+    const archivo_enlace = (try sql.querySingleValue(
+        []const u8,
+        "SELECT archivo_enlace FROM cancion_sube WHERE id_cancion = ?;",
+        .{id_cancion},
+    )).?;
+
+    // Comprobar si ya existe el archivo
+    const archivo_nombre = std.fs.path.basename(archivo_enlace);
+    const archivo_ruta = try std.fs.path.join(global_allocator, &.{ carpeta_musica_path, archivo_nombre });
+    defer global_allocator.free(archivo_ruta);
+    std.fs.cwd().access(archivo_ruta, .{ .read = true }) catch |err| switch (err) {
+        error.FileNotFound => {
+            // Descargar archivo
+            print("Descargando archivo...\n", .{});
+            utils.downloadFile(global_allocator, archivo_enlace, archivo_ruta) catch |err_download| {
+                print("Ha ocurrido un error descargando el archivo: {}\n", .{err_download});
+                return;
+            };
+        },
+        else => return err,
+    };
+
+    print("Archivo disponible, reproduciendo!\n\n", .{});
+
+    music.play(archivo_ruta) catch |err| {
+        print("Ha ocurrido un error reproduciendo archivo: {}\n", .{err});
+        return;
+    };
+
+    var reproduciendo = true;
+    while (true) {
+        if (reproduciendo) {
+            print("1. Pausar\n", .{});
+        } else {
+            print("1. Reanudar\n", .{});
+        }
+        print("2. Salir\n", .{});
+
+        const input = try utils.readNumber(u32, stdin);
+        switch (input) {
+            1 => {
+                if (reproduciendo) music.pause() else music.resumeMusic();
+                reproduciendo = !reproduciendo;
+            },
+            2 => {
+                music.stop();
+                break;
+            },
+            else => {},
+        }
+    }
+}
 
 fn anadirAPlaylist(id_cancion: u32) !void {}
 
@@ -686,19 +747,20 @@ fn accederPerfil() !void {
 fn listarCancionesPlaylist(id_playlist: usize) !void {}
 
 fn accederCancion() !void {
-    // TODO pensar cómo hacer que solo muestre opciones 2 y 3 si es autor. igual que
-    // la funcion login devuelva un Usuario con toda la información?
-    while (true) {
-        print("Introduce el id de la canción.", .{});
-        const input = try utils.readNumber(u32, stdin);
-        const id_cancion = (try sql.querySingleValue(u32, "SELECT * FROM cancion_activa WHERE id_cancion=?;", .{input})) orelse {
-            print("Error: canción no encontrada\n", .{});
-            return;
-        };
+    print("Introduce el id de la canción.", .{});
+    const id_cancion = try utils.readNumber(u32, stdin);
 
-        print("AQUI VA EL MENU DE CANCION DE LA CANCION {d}\n", .{id_cancion});
-        break;
-    }
+    // Comprobar que existe
+    _ = (try sql.querySingleValue(
+        u32,
+        "SELECT * FROM cancion_activa WHERE id_cancion=?;",
+        .{id_cancion},
+    )) orelse {
+        print("Error: canción no encontrada\n", .{});
+        return;
+    };
+
+    try menuCancion(id_cancion);
 }
 
 fn accederPlaylists() !void {
@@ -787,6 +849,11 @@ pub fn main() !void {
 
     try sql.init(global_allocator);
     defer sql.deinit();
+
+    try music.init();
+
+    // Crear la carpeta donde se guardarán los archivos
+    std.fs.cwd().makeDir(carpeta_musica_path) catch |err| if (err != error.PathAlreadyExists) return err;
 
     // Run mainApp. If a SQL error occurs, get and print the error message for debugging.
     mainApp() catch |err| switch (err) {
