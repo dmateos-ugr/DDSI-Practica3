@@ -340,6 +340,13 @@ fn darBaja(nick: []const u8) !void {
 fn menuMiCuenta(nick: []const u8) !void {
     print("\nMI CUENTA", .{});
 
+    const count = try sql.querySingleValue(u32,
+        \\ SELECT COUNT(*)
+        \\ FROM autor
+        \\ WHERE nick = ?;
+    , .{nick});
+    const esAutor = count.? == 1;
+
     const user_data = (try sql.querySingle(Usuario,
         \\ SELECT * FROM USUARIO
         \\  WHERE nick = ?;
@@ -350,6 +357,12 @@ fn menuMiCuenta(nick: []const u8) !void {
     print("\nApellidos: {s}", .{user_data.apellidos});
     print("\nCorreo: {s}", .{user_data.correo});
     print("\nFecha de nacimiento: {}/{}/{}\n", .{ user_data.fecha_nacimiento.year, user_data.fecha_nacimiento.month, user_data.fecha_nacimiento.day });
+
+    if (esAutor) {
+        print("\nActualmente su tipo es: {s}\n", .{"Autor"});
+    } else {
+        print("\nActualmente su tipo es: {s}\n", .{"Usuario"});
+    }
 
     print("\nLista de amigos:", .{});
 
@@ -386,7 +399,7 @@ fn menuMiCuenta(nick: []const u8) !void {
 
 fn menuMisCanciones(nick: []const u8) !void {
     while (true) {
-        print("\n1. Subir Canción\n2. Eliminar Canción\n3. Listar Canciones\n4. Salir\n", .{});
+        print("\n1. Subir Canción\n2. Eliminar Canción\n3. Listar Canciones\n4. Atrás\n", .{});
         const input = try utils.readNumber(usize, stdin);
         switch (input) {
             1 => try subirCancion(nick),
@@ -554,11 +567,14 @@ fn listarPlaylistsAutor(nick: []const u8) !void {
     }
 }
 
-// TODO: Comprobar que es publica
 fn listarPlaylists() !void {
     const playlists = try sql.query(
         Playlist,
-        "SELECT * FROM playlists_crea",
+        \\ SELECT * FROM (
+        \\  (SELECT * FROM playlist_publica NATURAL JOIN playlists_crea)
+        \\  MINUS
+        \\ (SELECT id_playlist,nombre,fecha_creacion,nick FROM playlists_crea NATURAL JOIN usuario_no_activo));
+    ,
         .{},
     );
     defer sql.getAllocator().free(playlists);
@@ -813,7 +829,7 @@ fn accederPlaylists() !void {
 
 fn menuExplorar(nick: []const u8) !void {
     while (true) {
-        print("\n1. Buscar canciones\n2. Buscar playlists\n3. Acceder a canción\n4. Acceder perfil\n5. Acceder a playlist\n6. Salir\n", .{});
+        print("\n1. Buscar canciones\n2. Buscar playlists\n3. Acceder a canción\n4. Acceder perfil\n5. Acceder a playlist\n6. Atrás\n", .{});
         const input = try utils.readNumber(usize, stdin);
         switch (input) {
             1 => try listarCanciones(),
@@ -828,19 +844,38 @@ fn menuExplorar(nick: []const u8) !void {
 }
 
 fn menuPrincipal(nick: []const u8) !void {
-    // TODO pensar cómo hacer que solo muestre opciones 2 y 3 si es autor. igual que
-    // la funcion login devuelva un Usuario con toda la información?
+    //Copio pego mi solución del menú cuenta para averiguar si eres autor o no. Probablemente haya formas mejores de hacerlo
+
     while (true) {
-        print("\n1. Mi cuenta\n2. Mis canciones\n3. Mis contratos\n4. Mis playlists.\n5. Explorar\n6. Salir\n", .{});
-        const input = try utils.readNumber(usize, stdin);
-        switch (input) {
-            1 => try menuMiCuenta(nick),
-            2 => try menuMisCanciones(nick),
-            3 => try menuMisContratos(nick),
-            4 => try menuMisPlaylists(nick),
-            5 => try menuExplorar(nick),
-            6 => break,
-            else => {},
+        const count = try sql.querySingleValue(u32,
+            \\ SELECT COUNT(*)
+            \\ FROM autor
+            \\ WHERE nick = ?;
+        , .{nick});
+        const esAutor = count.? == 1;
+
+        if (esAutor) {
+            print("\n1. Mi cuenta\n2. Mis canciones\n3. Mis contratos\n4. Mis playlists.\n5. Explorar\n6. Salir\n", .{});
+            const input = try utils.readNumber(usize, stdin);
+            switch (input) {
+                1 => try menuMiCuenta(nick),
+                2 => try menuMisCanciones(nick),
+                3 => try menuMisContratos(nick),
+                4 => try menuMisPlaylists(nick),
+                5 => try menuExplorar(nick),
+                6 => break,
+                else => {},
+            }
+        } else {
+            print("\n1. Mi cuenta\n2. Mis playlists.\n3. Explorar\n4. Salir\n", .{});
+            const input = try utils.readNumber(usize, stdin);
+            switch (input) {
+                1 => try menuMiCuenta(nick),
+                2 => try menuMisPlaylists(nick),
+                3 => try menuExplorar(nick),
+                4 => break,
+                else => {},
+            }
         }
     }
 }
