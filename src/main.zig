@@ -31,6 +31,11 @@ const Cancion_Sube = struct {
     nick: []const u8,
 };
 
+const Cancion_Sube_Print = struct {
+    id_cancion: u32,
+    titulo: []const u8,
+};
+
 const Playlist = struct {
     id_playlist: u32,
     nombre: []const u8,
@@ -418,8 +423,8 @@ fn menuMisContratos(nick: []const u8) !void {
         print("\n1. Crear contrato de autor\n2. Crear contrato de promoción\n3. Renovar contrato\n4. Atrás\n", .{});
         const input = try utils.readNumber(usize, stdin);
         switch (input) {
-            1 => try crearContratoAutor(),
-            2 => try crearContratoPromocion(),
+            1 => try crearContratoAutor(nick),
+            2 => try crearContratoPromocion(nick),
             3 => try renovarContrato(),
             4 => break,
             else => {},
@@ -439,9 +444,21 @@ fn listarContratos(nick: []const u8) !void {
     defer sql.getAllocator().free(contratos_autor);
 
     for (contratos_autor) |autor| {
-        print("Contrato de autor {d}\n", .{
-            autor.id_contrato,
-        });
+        const canciones_autor = try sql.query(
+            Cancion_Sube_Print,
+            \\SELECT id_cancion, titulo
+            \\FROM firma NATURAL JOIN cancion_sube
+            \\WHERE id_contrato = ?;
+        ,
+            .{autor.id_contrato},
+        );
+        defer sql.getAllocator().free(canciones_autor);
+
+        print("\nContrato de autor: {d}\nCuenta bancaria: {s}\nCantidad pagada: {d}\nFecha de creación: {}\n", .{ autor.id_contrato, autor.cuenta_bancaria, autor.cantidad_pagada, utils.fmtSqlDate(autor.fecha_creacion) });
+        print("Canciones contratadas:\n", .{});
+        for (canciones_autor) |cancion| {
+            print("Id: {d} - Titulo: {s}\n", .{ cancion.id_cancion, cancion.titulo });
+        }
     }
 
     const contratos_promo = try sql.query(
@@ -455,14 +472,39 @@ fn listarContratos(nick: []const u8) !void {
     defer sql.getAllocator().free(contratos_promo);
 
     for (contratos_promo) |promo| {
-        print("Contrato de promoción {d}, fecha de caducidad: {}\n", .{
-            promo.id_contrato,
-            utils.fmtSqlDate(promo.fecha_creacion),
-        });
+        const canciones_promo = try sql.query(
+            Cancion_Sube_Print,
+            \\SELECT id_cancion, titulo
+            \\FROM firma NATURAL JOIN cancion_sube
+            \\WHERE id_contrato = ?;
+        ,
+            .{promo.id_contrato},
+        );
+        defer sql.getAllocator().free(canciones_promo);
+
+        print("\nContrato de promoción: {d}\nCuenta bancaria: {s}\nCantidad pagada: {d}\nFecha de creación: {}\nFecha de caducidad: {}\n", .{ promo.id_contrato, promo.cuenta_bancaria, promo.cantidad_pagada, utils.fmtSqlDate(promo.fecha_creacion), utils.fmtSqlDate(promo.fecha_caducidad) });
+        print("Canciones contratadas:\n", .{});
+        for (canciones_promo) |cancion| {
+            print("Id: {d} - Titulo: {s}\n", .{ cancion.id_cancion, cancion.titulo });
+        }
     }
 }
-// TODO: seleccionar canciones a vender
-fn crearContratoAutor() !void {
+
+fn anadirCancion(id_contrato: u32) !void {
+    print("\nIntroduce el identificador de la canción:\n", .{});
+    const id_cancion = try utils.readNumber(u8, stdin);
+
+    sql.execute("BEGIN add_firma(?, ?); END;", .{ id_contrato, id_cancion }) catch |err| {
+        const sql_err = sql.getLastError() orelse return err;
+        defer sql_err.deinit();
+        print("Error añadiendo canción: {s}\n", .{sql_err.msg});
+        return;
+    };
+
+    print("\nCanción añadida al contrato!\n", .{});
+}
+
+fn crearContratoAutor(nick: []const u8) !void {
     print("\nIntroduce cuenta bancaria en la que abonar:\n", .{});
     var buf_cuenta_banco: [consts.max_length.cuenta_banco]u8 = undefined;
     const cuenta_banco = try utils.readString(stdin, &buf_cuenta_banco);
@@ -470,21 +512,39 @@ fn crearContratoAutor() !void {
     print("\nIntroduce la cantidad a pagar:\n", .{});
     const cantidad_pagar = try utils.readNumber(u32, stdin);
 
-    // HACER SAVEPOINT
-    try sql.execute("BEGIN crear_contrato_autor(?, ?); END;", .{
+    const id_contrato = (try sql.querySingleValue(
+        u32,
+        \\SELECT MAX(id_contrato)
+        \\FROM contrato;
+    ,
+        .{},
+    )) orelse unreachable;
+
+    try sql.createSavePoint("inicio_autor");
+    try sql.execute("BEGIN crear_contrato_autor(?, ?, ?); END;", .{
+        id_contrato + 1,
         cuenta_banco,
         cantidad_pagar,
     });
-    print("\nContrato de autor creado!\n", .{});
 
-    // HACER MENU DE INTRODUCCION DE CANCIONES
-    // LISTAR CANCIONES DE AUTOR, PEDIR CANCIONES Y POR CADA CANCIÓN
-    // LLAMAR A UNA FUNCION PARA AÑADIR TUPLA A FIRMA
+    while (true) {
+        print("\nAquí le muestro sus canciones disponibles en SpotyCloud:\n", .{});
+        try listarCancionesAutor(nick);
+        print("\n1. Añadir canción al contrato\n2. Eliminar canciones seleccionadas\n3. Finalizar contrato\n", .{});
+        const input = try utils.readNumber(usize, stdin);
+        switch (input) {
+            1 => try anadirCancion(id_contrato + 1),
+            2 => try sql.rollbackToSavePoint("inicio_autor"),
+            3 => break,
+            else => {},
+        }
+    }
+
+    print("\nContrato de autor creado!\n", .{});
     try sql.commit();
 }
 
-// TODO: seleccionar canciones a promocionar
-fn crearContratoPromocion() !void {
+fn crearContratoPromocion(nick: []const u8) !void {
     print("\nIntroduce cuenta bancaria en la que abonar:\n", .{});
     var buf_cuenta_banco: [consts.max_length.cuenta_banco]u8 = undefined;
     const cuenta_banco = try utils.readString(stdin, &buf_cuenta_banco);
@@ -504,17 +564,40 @@ fn crearContratoPromocion() !void {
         .year = year,
     };
 
-    try sql.execute("BEGIN crear_contrato_promocion(?, ?, ?); END;", .{
+    const id_contrato = (try sql.querySingleValue(
+        u32,
+        \\SELECT MAX(id_contrato)
+        \\FROM contrato;
+    ,
+        .{},
+    )) orelse unreachable;
+    try sql.createSavePoint("inicio_promo");
+    try sql.execute("BEGIN crear_contrato_promocion(?, ?, ?, ?); END;", .{
+        id_contrato + 1,
         cuenta_banco,
         cantidad_pagar,
         fecha_vencimiento,
     });
+
+    while (true) {
+        print("\nAquí le muestro sus canciones disponibles en SpotyCloud:\n", .{});
+        try listarCancionesAutor(nick);
+        print("\n1. Añadir canción al contrato\n2. Eliminar canciones seleccionadas\n3. Finalizar contrato\n", .{});
+        const input = try utils.readNumber(usize, stdin);
+        switch (input) {
+            1 => try anadirCancion(id_contrato + 1),
+            2 => try sql.rollbackToSavePoint("inicio_promo"),
+            3 => break,
+            else => {},
+        }
+    }
+
     try sql.commit();
     print("contrato de promocion creado!\n", .{});
 }
 
 fn renovarContrato() !void {
-    print("\nIntroduce el indentificador del contrato que desea renovar:\n", .{});
+    print("\nIntroduce el indentificador del contrato de promoción que desea renovar:\n", .{});
     const id_cont = try utils.readNumber(u32, stdin);
 
     print("Introduce la fecha de renovación del contrato (dia): \n", .{});
@@ -529,9 +612,14 @@ fn renovarContrato() !void {
         .year = year,
     };
 
-    try sql.execute("BEGIN renovar_contrato(?, ?); END;", .{ id_cont, fecha_renovacion });
+    sql.execute("BEGIN renovar_contrato(?, ?); END;", .{ id_cont, fecha_renovacion }) catch |err| {
+        const sql_err = sql.getLastError() orelse return err;
+        defer sql_err.deinit();
+        print("Error renovando contrato: {s}\n", .{sql_err.msg});
+        return;
+    };
     try sql.commit();
-    print("contrato renovado!\n", .{});
+    print("\nContrato renovado!\n", .{});
 }
 
 fn menuMisPlaylists(nick: []const u8) !void {
