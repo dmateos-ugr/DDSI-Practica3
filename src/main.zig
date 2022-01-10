@@ -216,16 +216,32 @@ fn listarCancionesAutor(autor: []const u8) !void {
     }
 }
 
-fn listarCanciones() !void {
+fn listarCancionesTitulo() !void {
     // TODO: cuando tengamos las evaluaciones, ordenar adecuadamente
+    var buf_titulo: [consts.max_length.nick]u8 = undefined;
+
+    print("\nIntroduce un título (ninguno buscará todas).", .{});
+    const titulo = try utils.readString(stdin, &buf_titulo);
+
     var lista = try sql.query(Cancion_Sube,
-        \\ (SELECT * FROM cancion_promocionada NATURAL JOIN cancion_sube
-        \\ UNION
-        \\ SELECT * FROM 
-        \\  ((SELECT * FROM cancion_activa) MINUS (SELECT * FROM cancion_promocionada)) NATURAL JOIN cancion_sube)
-        \\ MINUS
-        \\ (SELECT id_cancion, titulo, archivo_enlace, fecha, etiqueta, nick FROM cancion_sube NATURAL JOIN usuario_no_activo);
-    , .{});
+        \\ SELECT * FROM( 
+        \\      (
+        \\          SELECT * FROM cancion_promocionada NATURAL JOIN cancion_sube 
+        \\          UNION
+        \\          SELECT * FROM (
+        \\              (SELECT * FROM cancion_activa) MINUS (SELECT * FROM cancion_promocionada)
+        \\          ) 
+        \\          NATURAL JOIN 
+        \\          cancion_sube
+        \\      )
+        \\      MINUS
+        \\      (
+        \\          SELECT id_cancion, titulo, archivo_enlace, fecha, etiqueta, nick 
+        \\          FROM cancion_sube NATURAL JOIN usuario_no_activo
+        \\      )
+        \\ ) 
+        \\ WHERE LOWER(titulo) LIKE '%' || LOWER(?) || '%';
+    , .{titulo});
     defer sql.getAllocator().free(lista);
 
     for (lista) |fila| {
@@ -931,7 +947,7 @@ fn menuExplorar(nick: []const u8) !void {
         print("\n1. Buscar canciones\n2. Buscar playlists\n3. Acceder a canción\n4. Acceder perfil\n5. Acceder a playlist\n6. Atrás\n", .{});
         const input = try utils.readNumber(usize, stdin);
         switch (input) {
-            1 => try listarCanciones(),
+            1 => try listarCancionesTitulo(),
             2 => try listarPlaylists(),
             3 => try accederCancion(),
             4 => try accederPerfil(),
