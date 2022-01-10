@@ -929,8 +929,8 @@ fn accederPlaylists() !void {
     print("Introduce el id de la playlist.", .{});
     const input = try utils.readNumber(u32, stdin);
     const id_playlist = (try sql.querySingleValue(u32,
-        // Busca entre las playlists públicas
-        // Quita de los resultados las que son de usuarios no activos
+    // Busca entre las playlists públicas
+    // Quita de los resultados las que son de usuarios no activos
         \\  SELECT * FROM playlist_publica WHERE id_playlist=? 
         \\ MINUS 
         \\  (SELECT id_playlist FROM playlists_crea NATURAL JOIN usuario_no_activo);
