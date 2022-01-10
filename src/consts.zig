@@ -7,6 +7,6 @@ pub const max_length = struct {
     pub const nombre_playlist = 30;
     pub const cuenta_banco = 40;
     pub const titulo = 30;
-    pub const archivo_enlace = 100;
+    pub const archivo_enlace = 500;
     pub const etiqueta = 30;
 };

@@ -89,10 +89,14 @@ pub fn uploadFile(allocator: *Allocator, path: []const u8) ![]u8 {
         else => unreachable,
     }
 
+    const file_name = std.fs.path.basename(path);
+    const file_name_escaped = try escapeString(allocator, file_name);
+    defer allocator.free(file_name_escaped);
+
     const url = try std.fmt.allocPrint(
         allocator,
         "https://www.mboxdrive.com/{s}",
-        .{std.fs.path.basename(path)},
+        .{file_name_escaped},
     );
     return url;
 }
@@ -122,14 +126,39 @@ pub fn downloadFile(allocator: *Allocator, url: []const u8, output_path: []const
     }
 }
 
-const Md5 = std.crypto.hash.Md5;
-pub const md5_hex_length = Md5.digest_length * 2;
+/// unreserved  = ALPHA / DIGIT / "-" / "." / "_" / "~"
+fn isUnreserved(c: u8) bool {
+    return switch (c) {
+        'A'...'Z', 'a'...'z', '0'...'9', '-', '.', '_', '~' => true,
+        else => false,
+    };
+}
 
-pub fn md5(in: []const u8, out: *[md5_hex_length]u8) void {
-    var hash_bytes: [Md5.digest_length]u8 = undefined;
-    Md5.hash(in, &hash_bytes, .{});
-    const hex_formatter = std.fmt.fmtSliceHexLower(&hash_bytes);
-    _ = std.fmt.bufPrint(out, "{}", .{hex_formatter}) catch unreachable;
+/// Applies URI encoding and replaces all reserved characters with their respective %XX code.
+// https://github.com/MasterQ32/zig-uri/blob/master/uri.zig
+pub fn escapeString(allocator: *Allocator, input: []const u8) error{OutOfMemory}![]const u8 {
+    var outsize: usize = 0;
+    for (input) |c| {
+        outsize += if (isUnreserved(c)) @as(usize, 1) else 3;
+    }
+    var output = try allocator.alloc(u8, outsize);
+    var outptr: usize = 0;
+
+    for (input) |c| {
+        if (isUnreserved(c)) {
+            output[outptr] = c;
+            outptr += 1;
+        } else {
+            var buf: [2]u8 = undefined;
+            _ = std.fmt.bufPrint(&buf, "{X:0>2}", .{c}) catch unreachable;
+
+            output[outptr + 0] = '%';
+            output[outptr + 1] = buf[0];
+            output[outptr + 2] = buf[1];
+            outptr += 3;
+        }
+    }
+    return output;
 }
 
 pub fn fmtSqlDate(date: sql.SqlDate) std.fmt.Formatter(fmtSqlDateFn) {
