@@ -53,17 +53,6 @@ const Contrato_Promocion = struct {
     fecha_caducidad: sql.SqlDate,
 };
 
-fn getFechaActual() sql.SqlDate {
-    return bloque: {
-        const date = utils.DateTime.fromTimestamp(std.time.timestamp());
-        break :bloque sql.SqlDate{
-            .year = @intCast(c_short, date.year),
-            .month = date.month,
-            .day = date.day,
-        };
-    };
-}
-
 /// Pide nickname y contraseña, guardando el nickname en `buf_nickname`.
 /// Devuelve una slice apuntando a `buf_nickname` con el nick leído, o null
 /// si el login ha sido incorrecto.
@@ -173,15 +162,6 @@ fn eliminarCancion(nick: []const u8) !void {
     print("Introduce el id:\n", .{});
     const id = try utils.readNumber(u8, stdin);
 
-    // DANI: este check mejor lo metes dentro del sql en ELIMINAR_CANCION y que haga
-    // raise_application_error para que nos llegue aquí el mensaje de error en sql_err.msg
-    // SOY DANI: YA LO HE HECHO :)
-    // const check = (try sql.querySingleValue(u32, "SELECT id_cancion FROM cancion_sube WHERE id_cancion=?;", .{id}));
-    // if (check == 0) {
-    //     print("Error: canción no encontrada\n", .{});
-    //     return;
-    // }
-
     sql.execute("BEGIN ELIMINAR_CANCION(?, ?); END;", .{ id, nick }) catch |err| {
         const sql_err = sql.getLastError() orelse return err;
         defer sql_err.deinit();
@@ -192,6 +172,12 @@ fn eliminarCancion(nick: []const u8) !void {
     try sql.commit();
 
     print("Canción eliminada con éxito\n", .{});
+}
+
+fn imprimirCanciones(canciones: []const Cancion_Sube) void {
+    for (canciones) |cancion| {
+        print("{}. {s} - {s}\n", .{ cancion.id_cancion, cancion.titulo, cancion.nick });
+    }
 }
 
 fn listarCancionesAutor(autor: []const u8) !void {
@@ -205,19 +191,17 @@ fn listarCancionesAutor(autor: []const u8) !void {
         \\  UNION
         \\  SELECT * FROM 
         \\      ((SELECT * FROM cancion_activa) MINUS (SELECT * FROM cancion_promocionada)) NATURAL JOIN cancion_sube)
-        \\ WHERE nick = ?;
+        \\ WHERE nick = ?
+        \\ ORDER BY fecha;
     , .{autor});
     defer sql.getAllocator().free(lista);
-
-    for (lista) |fila| {
-        print("{d}. {s} - {s}\n", .{ fila.id_cancion, fila.titulo, fila.nick });
-    }
+    imprimirCanciones(lista);
 }
 
 fn listarCancionesTitulo() !void {
     var buf_titulo: [consts.max_length.nick]u8 = undefined;
 
-    print("\nIntroduce un título (ninguno buscará todas).", .{});
+    print("\nIntroduce un título (déjalo vacío para listar todas).", .{});
     const titulo = try utils.readString(stdin, &buf_titulo);
 
     var lista = try sql.query(Cancion_Sube,
@@ -241,13 +225,11 @@ fn listarCancionesTitulo() !void {
         \\          FROM cancion_sube NATURAL JOIN usuario_no_activo
         \\      )
         \\ ) 
-        \\ WHERE LOWER(titulo) LIKE '%' || LOWER(?) || '%';
+        \\ WHERE LOWER(titulo) LIKE '%' || LOWER(?) || '%'
+        \\ ORDER BY fecha;
     , .{titulo});
     defer sql.getAllocator().free(lista);
-
-    for (lista) |fila| {
-        print("{d}. {s} - {s}\n", .{ fila.id_cancion, fila.titulo, fila.nick });
-    }
+    imprimirCanciones(lista);
 }
 
 fn addAmigo(nick: []const u8) !void {
@@ -334,30 +316,26 @@ fn darBaja(nick: []const u8) !void {
 
         try sql.commit();
 
+        print("Es una pena. Nos vemos!\n", .{});
+
         std.os.exit(0);
     }
 }
 
-fn menuMiCuenta(nick: []const u8) !void {
-    print("\nMI CUENTA", .{});
-
+fn imprimirInfoUsuario(nick: []const u8) !void {
     const es_autor = try esAutor(nick);
-
     const user_data = (try sql.querySingle(Usuario,
         \\ SELECT * FROM USUARIO
         \\  WHERE nick = ?;
-    , .{nick})) orelse unreachable;
+    , .{nick})).?;
 
     print("\nNick: {s}", .{user_data.nick});
     print("\nNombre: {s}", .{user_data.nombre});
     print("\nApellidos: {s}", .{user_data.apellidos});
     print("\nCorreo: {s}", .{user_data.correo});
     print("\nFecha de nacimiento: {}\n", .{utils.fmtSqlDate(user_data.fecha_nacimiento)});
-
     const tipo = if (es_autor) "Autor" else "Usuario";
     print("\nActualmente su tipo es: {s}\n", .{tipo});
-
-    print("\nLista de amigos:", .{});
 
     var lista_amigos = try sql.query(Usuario,
     // Coge los usuarios que aparezcan en amistarse en una pareja con el usuario indicado
@@ -374,10 +352,16 @@ fn menuMiCuenta(nick: []const u8) !void {
     , .{ nick, nick, nick });
     defer sql.getAllocator().free(lista_amigos);
 
+    print("\nLista de amigos:", .{});
     for (lista_amigos) |fila| {
         print("\n{s}", .{fila.nick});
     }
+    print("\n", .{});
+}
 
+fn menuMiCuenta(nick: []const u8) !void {
+    print("\nMI CUENTA", .{});
+    try imprimirInfoUsuario(nick);
     print("\n", .{});
 
     while (true) {
@@ -642,7 +626,7 @@ fn renovarContrato(nick: []const u8) !void {
 fn menuMisPlaylists(nick: []const u8) !void {
     while (true) {
         print("\n[MIS PLAYLISTS]\n", .{});
-        try listarPlaylistsAutor(nick);
+        try listarPlaylistsAutor(nick, true);
         print("\n1. Crear playlist\n2. Eliminar playlist\n3. Modificar playlist\n4. Atrás\n", .{});
         const input = try utils.readNumber(usize, stdin);
         switch (input) {
@@ -655,14 +639,23 @@ fn menuMisPlaylists(nick: []const u8) !void {
     }
 }
 
-fn listarPlaylistsAutor(nick: []const u8) !void {
+fn listarPlaylistsAutor(nick: []const u8, incluir_privadas: bool) !void {
+    const query = if (incluir_privadas)
+        "SELECT * FROM playlists_crea WHERE nick = ?"
+    else
+        "SELECT * FROM playlist_publica NATURAL JOIN playlists_crea WHERE nick = ?";
+
     const playlists = try sql.query(
         Playlist,
-        "SELECT * FROM playlists_crea WHERE nick = ?",
+        query,
         .{nick},
     );
     defer sql.getAllocator().free(playlists);
 
+    imprimirPlaylists(playlists);
+}
+
+fn imprimirPlaylists(playlists: []const Playlist) void {
     for (playlists) |playlist| {
         print("{d}: {s}, creada el {}\n", .{
             playlist.id_playlist,
@@ -672,26 +665,24 @@ fn listarPlaylistsAutor(nick: []const u8) !void {
     }
 }
 
-fn listarPlaylists() !void {
+fn listarPlaylists(nick: []const u8) !void {
+    // Todas las playlists del usuario (privadas o públicas) + todas las públicas
+    // cuyo autor esté activo
     const playlists = try sql.query(
         Playlist,
+        // Coge las playlists del usuario (tanto públicas como privadas)
         // Coge las playlists públicas
         // Quita las que son de usuarios no activos
-        \\  (SELECT * FROM playlist_publica NATURAL JOIN playlists_crea)
-        \\  MINUS
+        \\ (SELECT * FROM playlists_crea WHERE nick = ?)
+        \\ UNION
+        \\ (SELECT * FROM playlist_publica NATURAL JOIN playlists_crea)
+        \\ MINUS
         \\ (SELECT id_playlist,nombre,fecha_creacion,nick FROM playlists_crea NATURAL JOIN usuario_no_activo);
     ,
-        .{},
+        .{nick},
     );
     defer sql.getAllocator().free(playlists);
-
-    for (playlists) |playlist| {
-        print("{d}: {s}, creada el {}\n", .{
-            playlist.id_playlist,
-            playlist.nombre,
-            utils.fmtSqlDate(playlist.fecha_creacion),
-        });
-    }
+    imprimirPlaylists(playlists);
 }
 
 fn crearPlaylist(nick: []const u8) !void {
@@ -724,8 +715,8 @@ fn eliminarPlaylist(nick: []const u8) !void {
     print("Playlist eliminada!\n", .{});
 }
 
-fn addCancionPlaylist(id_playlist: u32) !void {
-    print("\nIntroduce el id de la cancion a añadir:\n", .{});
+fn addCancionPlaylistPideCancion(id_playlist: u32) !void {
+    print("Introduce el id de la canción:\n", .{});
     const id_cancion = try utils.readNumber(u32, stdin);
 
     sql.execute("BEGIN ADD_CANCION_PLAYLIST(?, ?); END;", .{ id_cancion, id_playlist }) catch |err| {
@@ -737,7 +728,7 @@ fn addCancionPlaylist(id_playlist: u32) !void {
 
     try sql.commit();
 
-    print("Cacnión añadida.\n", .{});
+    print("Canción añadida.\n", .{});
 }
 
 fn eliminarCancionPlaylist(id_playlist: u32) !void {
@@ -753,7 +744,7 @@ fn eliminarCancionPlaylist(id_playlist: u32) !void {
 
     try sql.commit();
 
-    print("Cacnión eliminada.\n", .{});
+    print("Canción eliminada.\n", .{});
 }
 
 fn modificarPlaylist(nick: []const u8) !void {
@@ -771,13 +762,12 @@ fn modificarPlaylist(nick: []const u8) !void {
         return;
     }
 
-    // ESTE MENÚ ES DE MIGUEL
     while (true) {
         try listarCancionesPlaylist(id_playlist);
         print("\n1. Añadir canción\n2. Eliminar canción\n3. Atrás\n", .{});
         const input = try utils.readNumber(usize, stdin);
         switch (input) {
-            1 => try addCancionPlaylist(id_playlist),
+            1 => try addCancionPlaylistPideCancion(id_playlist),
             2 => try eliminarCancionPlaylist(id_playlist),
             3 => break,
             else => {},
@@ -785,7 +775,7 @@ fn modificarPlaylist(nick: []const u8) !void {
     }
 }
 
-fn menuCancion(id_cancion: u32) !void {
+fn menuCancion(nick: []const u8, id_cancion: u32) !void {
     // Precondición: existe una canción con ese id
     const cancion = (try sql.querySingle(
         Cancion_Sube,
@@ -799,16 +789,36 @@ fn menuCancion(id_cancion: u32) !void {
     );
 
     while (true) {
-        print("\n1. Reproducir\n2. Añadir a playlist\n3. Evaluar\n4. Atrás\n", .{});
+        print("\n1. Reproducir\n2. Añadir a playlist\n3. Atrás\n", .{});
         const input = try utils.readNumber(usize, stdin);
         switch (input) {
             1 => try reproducirCancion(id_cancion),
-            2 => try anadirAPlaylist(id_cancion),
-            3 => try evaluar(id_cancion),
-            4 => break,
+            2 => try addCancionPlaylistPidePlaylist(nick, id_cancion),
+            3 => break,
             else => {},
         }
     }
+}
+
+fn addCancionPlaylistPidePlaylist(nick: []const u8, id_cancion: u32) !void {
+    try listarPlaylistsAutor(nick, true);
+
+    print("Introduce el id de la playlist:\n", .{});
+    const id_playlist = try utils.readNumber(u32, stdin);
+
+    sql.execute(
+        "BEGIN ADD_CANCION_PLAYLIST_USER(?, ?, ?); END;",
+        .{ id_cancion, id_playlist, nick },
+    ) catch |err| {
+        const sql_err = sql.getLastError() orelse return err;
+        defer sql_err.deinit();
+        print("Error añadiendo canción a la playlist: {s}\n", .{sql_err.msg});
+        return;
+    };
+
+    try sql.commit();
+
+    print("Canción añadida.\n", .{});
 }
 
 fn reproducirCancion(id_cancion: u32) !void {
@@ -866,19 +876,6 @@ fn reproducirCancion(id_cancion: u32) !void {
     }
 }
 
-fn anadirAPlaylist(id_cancion: u32) !void {}
-
-fn evaluar(id_cancion: u32) !void {
-    print("\nIntroduce la evaluación de la canción:\n", .{});
-    const eval = try utils.readNumber(u32, stdin);
-
-    var eval_actual = try sql.query(Cancion_Sube, "SELECT evaluacion FROM CANCION_SUBE WHERE id_cancion=?", .{id_cancion});
-    defer sql.getAllocator().free(eval_actual);
-
-    var aux = try sql.query(Cancion_Sube, "UPDATE CANCION_SUBE SET evaluacion = ? WHERE id_cancion=?", .{ eval, id_cancion });
-    defer sql.getAllocator().free(aux);
-}
-
 fn accederPerfil() !void {
     print("Introduce un nickname:\n", .{});
     var buf_nick: [consts.max_length.nick]u8 = undefined;
@@ -890,10 +887,12 @@ fn accederPerfil() !void {
         return;
     };
 
-    print("=== CANCIONES ===\n", .{});
+    try imprimirInfoUsuario(nickname);
+
+    print("\n=== CANCIONES ===\n", .{});
     try listarCancionesAutor(nickname);
     print("\n=== PLAYLISTS ===\n", .{});
-    try listarPlaylistsAutor(nickname);
+    try listarPlaylistsAutor(nickname, false);
 }
 
 fn listarCancionesPlaylist(id_playlist: u32) !void {
@@ -914,7 +913,7 @@ fn listarCancionesPlaylist(id_playlist: u32) !void {
     }
 }
 
-fn accederCancion() !void {
+fn accederCancion(nick: []const u8) !void {
     print("Introduce el id de la canción.", .{});
     const id_cancion = try utils.readNumber(u32, stdin);
 
@@ -929,7 +928,7 @@ fn accederCancion() !void {
         return;
     };
 
-    try menuCancion(id_cancion);
+    try menuCancion(nick, id_cancion);
 }
 
 fn accederPlaylists() !void {
@@ -955,8 +954,8 @@ fn menuExplorar(nick: []const u8) !void {
         const input = try utils.readNumber(usize, stdin);
         switch (input) {
             1 => try listarCancionesTitulo(),
-            2 => try listarPlaylists(),
-            3 => try accederCancion(),
+            2 => try listarPlaylists(nick),
+            3 => try accederCancion(nick),
             4 => try accederPerfil(),
             5 => try accederPlaylists(),
             6 => break,

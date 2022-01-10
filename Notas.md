@@ -1,5 +1,16 @@
 https://www.quora.com/What-is-the-easiest-way-to-store-files-in-the-Oracle-database
 
+firma apunta a donde no es
+
+puedes firmar contratos con canciones que no son tuyas
+
+imprimir canciones con titulo vacio
+
+add_cancion_playlist:
+	cancion existe
+	cancion activa
+	cancion de usuario activa
+
 ## DISPARADORES
 1. rs1. al quitar una tupla de la tabla Autor, comprobar que no tenga canciones subidas. en ese caso, error. MIGUEL
 2. rs2 y rs3. al crear una tupla en la tabla Firma, comprobar que el autor de la canción tenga más de 16 años. DANIEL.
