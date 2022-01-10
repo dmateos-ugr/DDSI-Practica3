@@ -195,8 +195,11 @@ fn eliminarCancion(nick: []const u8) !void {
 }
 
 fn listarCancionesAutor(autor: []const u8) !void {
-    // TODO: cuando tengamos las evaluaciones, ordenar adecuadamente
     var lista = try sql.query(Cancion_Sube,
+    // Selecciona las canciones promocionadas
+    // Las une a:
+    // Las canciones activas menos las promocionadas (para que se muestren primero las promocionadas y no dos veces)
+    //Coge solo las del autor indicado
         \\ SELECT * FROM 
         \\  (SELECT * FROM cancion_promocionada NATURAL JOIN cancion_sube
         \\  UNION
@@ -212,13 +215,16 @@ fn listarCancionesAutor(autor: []const u8) !void {
 }
 
 fn listarCancionesTitulo() !void {
-    // TODO: cuando tengamos las evaluaciones, ordenar adecuadamente
     var buf_titulo: [consts.max_length.nick]u8 = undefined;
 
     print("\nIntroduce un título (ninguno buscará todas).", .{});
     const titulo = try utils.readString(stdin, &buf_titulo);
 
     var lista = try sql.query(Cancion_Sube,
+    // Coge las canciones promocionadas
+    // Las une a las canciones activas sin promocionar
+    // Quita las canciones de autores inactivos
+    // A esto aplica las búsquedas
         \\ SELECT * FROM( 
         \\      (
         \\          SELECT * FROM cancion_promocionada NATURAL JOIN cancion_sube 
@@ -354,6 +360,10 @@ fn menuMiCuenta(nick: []const u8) !void {
     print("\nLista de amigos:", .{});
 
     var lista_amigos = try sql.query(Usuario,
+    // Coge los usuarios que aparezcan en amistarse en una pareja con el usuario indicado
+    // La sintaxis se complica porque no se puede hacer NATURAL JOIN
+    // En esta lista aparece el propio usuario, se quita
+    // Y quitamos los usuarios inactivos
         \\ ((SELECT NICK, NOMBRE, APELLIDOS, CORREO, CONTRASENA, FECHA_NACIMIENTO
         \\  FROM USUARIO u, (SELECT * FROM AMISTARSE WHERE (nick1 = ? OR nick2 = ?)) am
         \\  WHERE u.nick = am.nick1 OR u.nick = am.nick2)
@@ -658,6 +668,8 @@ fn listarPlaylistsAutor(nick: []const u8) !void {
 fn listarPlaylists() !void {
     const playlists = try sql.query(
         Playlist,
+        // Coge las playlists públicas
+        // Quita las que son de usuarios no activos
         \\  (SELECT * FROM playlist_publica NATURAL JOIN playlists_crea)
         \\  MINUS
         \\ (SELECT id_playlist,nombre,fecha_creacion,nick FROM playlists_crea NATURAL JOIN usuario_no_activo);
@@ -865,7 +877,8 @@ fn accederPerfil() !void {
     var buf_nick: [consts.max_length.nick]u8 = undefined;
     const nickname = try utils.readString(stdin, &buf_nick);
 
-    const user = (try sql.querySingle(Usuario, "SELECT * FROM usuario WHERE nick=?;", .{nickname})) orelse {
+    // Busca entre todos los usuarios pero quita los no activos
+    const user = (try sql.querySingle(Usuario, "SELECT * FROM usuario WHERE nick=? MINUS (SELECT * FROM USUARIO_NO_ACTIVO NATURAL JOIN USUARIO);", .{nickname})) orelse {
         print("Error: usuario no encontrado\n", .{});
         return;
     };
@@ -879,7 +892,13 @@ fn accederPerfil() !void {
 fn listarCancionesPlaylist(id_playlist: u32) !void {
     print("\nCanciones de la playlist {d}:\n", .{id_playlist});
     var lista = try sql.query(Cancion_Sube,
-        \\ SELECT * FROM (SELECT id_cancion FROM contiene WHERE id_playlist = ? ) NATURAL JOIN cancion_sube;
+    // Coge las canciones en la playlist
+    // Y les quita las canciones que son de usuarios no activos
+        \\ SELECT * FROM 
+        \\  (SELECT id_cancion FROM contiene WHERE id_playlist = ? ) NATURAL JOIN cancion_sube
+        \\ MINUS
+        \\  SELECT id_cancion, titulo, archivo_enlace, fecha, etiqueta, nick 
+        \\  FROM cancion_sube NATURAL JOIN usuario_no_activo;
     , .{id_playlist});
     defer sql.getAllocator().free(lista);
 
@@ -895,6 +914,7 @@ fn accederCancion() !void {
     // Comprobar que existe
     _ = (try sql.querySingleValue(
         u32,
+        // Busca la canción entre las canciones activas, pero les quita las canciones de usuarios no activos
         "(SELECT * FROM cancion_activa WHERE id_cancion=?) MINUS (SELECT id_cancion FROM cancion_sube NATURAL JOIN usuario_no_activo);",
         .{id_cancion},
     )) orelse {
@@ -908,7 +928,13 @@ fn accederCancion() !void {
 fn accederPlaylists() !void {
     print("Introduce el id de la playlist.", .{});
     const input = try utils.readNumber(u32, stdin);
-    const id_playlist = (try sql.querySingleValue(u32, "SELECT * FROM playlist_publica WHERE id_playlist=?;", .{input})) orelse {
+    const id_playlist = (try sql.querySingleValue(u32,
+        // Busca entre las playlists públicas
+        // Quita de los resultados las que son de usuarios no activos
+        \\  SELECT * FROM playlist_publica WHERE id_playlist=? 
+        \\ MINUS 
+        \\  (SELECT id_playlist FROM playlists_crea NATURAL JOIN usuario_no_activo);
+    , .{input})) orelse {
         print("Error: playlist no encontrada\n", .{});
         return;
     };
