@@ -503,6 +503,9 @@ fn anadirCancion(nick: []const u8, id_contrato: u32) !void {
 
 fn crearContratoAutor(nick: []const u8) !void {
     // TODO fusionar esta mierda
+    // TODO hacer que anadirCancion devuelva un bool diciendo si ha añadido o no
+    // si no se consigue añadir ninguna canción, hacer rollback a contrato_no_creado
+    // antes de salir
     print("\nIntroduce cuenta bancaria en la que abonar:\n", .{});
     var buf_cuenta_banco: [consts.max_length.cuenta_banco]u8 = undefined;
     const cuenta_banco = try utils.readString(stdin, &buf_cuenta_banco);
