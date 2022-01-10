@@ -31,11 +31,6 @@ const Cancion_Sube = struct {
     nick: []const u8,
 };
 
-const Cancion_Sube_Print = struct {
-    id_cancion: u32,
-    titulo: []const u8,
-};
-
 const Playlist = struct {
     id_playlist: u32,
     nombre: []const u8,
@@ -286,54 +281,31 @@ fn eliminarAmigo(nick: []const u8) !void {
 }
 
 fn modificarTipo(nick: []const u8) !void {
-    const count = try sql.querySingleValue(u32,
-        \\ SELECT COUNT(*)
-        \\ FROM autor
-        \\ WHERE nick = ?;
-    , .{nick});
-    const esAutor = count.? == 1;
+    const es_autor = try esAutor(nick);
+    const tipo = if (es_autor) "autor" else "usuario";
+    const otro_tipo = if (es_autor) "usuario" else "autor";
 
-    // Creo que me podría ahorrar código aquí pero no me atrevo a liarla
-    if (esAutor) {
-        print("\nActualmente su tipo es: {s}", .{"Autor"});
-        print("\nVa a cambiar su tipo a {s}", .{"Usuario"});
-        print("\nSi ya ha subido canciones, no puede cambiar a usuario", .{});
-
-        print("\nSeguro que quieres proceder? (y/n)", .{});
-        const seguro = try utils.readBoolYN(stdin);
-
-        if (seguro) {
-            sql.execute("BEGIN MODIFICAR_TIPO(?, ?); END;", .{ nick, count.? }) catch |err| {
-                const sql_err = sql.getLastError() orelse return err;
-                defer sql_err.deinit();
-                print("Error modificando tipo: {s}\n", .{sql_err.msg});
-                return;
-            };
-
-            try sql.commit();
-
-            print("\nHa dejado de ser autor", .{});
-        }
-    } else {
-        print("\nActualmente su tipo es: {s}", .{"Usuario"});
-        print("\nVa a cambiar su tipo a {s}", .{"Autor"});
+    print("\nActualmente su tipo es: {s}", .{tipo});
+    print("\nVa a cambiar su tipo a: {s}", .{otro_tipo});
+    if (es_autor)
+        print("\nSi ya ha subido canciones, no puede cambiar a usuario", .{})
+    else
         print("\nCuando suba canciones, no podrá revertir el cambio", .{});
 
-        print("\nSeguro que quieres proceder? (y/n)", .{});
-        const seguro = try utils.readBoolYN(stdin);
+    print("\nSeguro que quieres proceder? (y/n)", .{});
+    const seguro = try utils.readBoolYN(stdin);
 
-        if (seguro) {
-            sql.execute("BEGIN MODIFICAR_TIPO(?, ?); END;", .{ nick, count.? }) catch |err| {
-                const sql_err = sql.getLastError() orelse return err;
-                defer sql_err.deinit();
-                print("Error modificando tipo: {s}\n", .{sql_err.msg});
-                return;
-            };
+    if (seguro) {
+        sql.execute("BEGIN MODIFICAR_TIPO(?, ?); END;", .{ nick, @as(u32, @boolToInt(es_autor)) }) catch |err| {
+            const sql_err = sql.getLastError() orelse return err;
+            defer sql_err.deinit();
+            print("Error modificando tipo: {s}\n", .{sql_err.msg});
+            return;
+        };
 
-            try sql.commit();
+        try sql.commit();
 
-            print("\nAhora es autor", .{});
-        }
+        print("\nSu nuevo tipo es {s}\n", .{otro_tipo});
     }
 }
 
@@ -363,12 +335,7 @@ fn darBaja(nick: []const u8) !void {
 fn menuMiCuenta(nick: []const u8) !void {
     print("\nMI CUENTA", .{});
 
-    const count = try sql.querySingleValue(u32,
-        \\ SELECT COUNT(*)
-        \\ FROM autor
-        \\ WHERE nick = ?;
-    , .{nick});
-    const esAutor = count.? == 1;
+    const es_autor = try esAutor(nick);
 
     const user_data = (try sql.querySingle(Usuario,
         \\ SELECT * FROM USUARIO
@@ -379,13 +346,10 @@ fn menuMiCuenta(nick: []const u8) !void {
     print("\nNombre: {s}", .{user_data.nombre});
     print("\nApellidos: {s}", .{user_data.apellidos});
     print("\nCorreo: {s}", .{user_data.correo});
-    print("\nFecha de nacimiento: {}/{}/{}\n", .{ user_data.fecha_nacimiento.year, user_data.fecha_nacimiento.month, user_data.fecha_nacimiento.day });
+    print("\nFecha de nacimiento: {}\n", .{utils.fmtSqlDate(user_data.fecha_nacimiento)});
 
-    if (esAutor) {
-        print("\nActualmente su tipo es: {s}\n", .{"Autor"});
-    } else {
-        print("\nActualmente su tipo es: {s}\n", .{"Usuario"});
-    }
+    const tipo = if (es_autor) "Autor" else "Usuario";
+    print("\nActualmente su tipo es: {s}\n", .{tipo});
 
     print("\nLista de amigos:", .{});
 
@@ -462,6 +426,11 @@ fn listarContratos(nick: []const u8) !void {
     );
     defer sql.getAllocator().free(contratos_autor);
 
+    const Cancion_Sube_Print = struct {
+        id_cancion: u32,
+        titulo: []const u8,
+    };
+
     for (contratos_autor) |autor| {
         const canciones_autor = try sql.query(
             Cancion_Sube_Print,
@@ -473,7 +442,15 @@ fn listarContratos(nick: []const u8) !void {
         );
         defer sql.getAllocator().free(canciones_autor);
 
-        print("\nContrato de autor: {d}\nCuenta bancaria: {s}\nCantidad pagada: {d}\nFecha de creación: {}\n", .{ autor.id_contrato, autor.cuenta_bancaria, autor.cantidad_pagada, utils.fmtSqlDate(autor.fecha_creacion) });
+        print(
+            "\nContrato de autor: {d}\nCuenta bancaria: {s}\nCantidad pagada: {d}\nFecha de creación: {}\n",
+            .{
+                autor.id_contrato,
+                autor.cuenta_bancaria,
+                autor.cantidad_pagada,
+                utils.fmtSqlDate(autor.fecha_creacion),
+            },
+        );
         print("Canciones contratadas:\n", .{});
         for (canciones_autor) |cancion| {
             print("Id: {d} - Titulo: {s}\n", .{ cancion.id_cancion, cancion.titulo });
@@ -537,24 +514,26 @@ fn crearContratoAutor(nick: []const u8) !void {
         \\FROM contrato;
     ,
         .{},
-    )) orelse unreachable;
+    )) orelse 0;
 
-    try sql.createSavePoint("inicio_autor");
+    try sql.createSavePoint("contrato_no_creado");
     try sql.execute("BEGIN crear_contrato_autor(?, ?, ?); END;", .{
         id_contrato + 1,
         cuenta_banco,
         cantidad_pagar,
     });
+    try sql.createSavePoint("contrato_creado");
 
     while (true) {
         print("\nAquí le muestro sus canciones disponibles en SpotyCloud:\n", .{});
         try listarCancionesAutor(nick);
-        print("\n1. Añadir canción al contrato\n2. Eliminar canciones seleccionadas\n3. Finalizar contrato\n", .{});
+        print("\n1. Añadir canción al contrato\n2. Eliminar canciones seleccionadas\n3. Cancelar contrato\n4. Finalizar contrato\n", .{});
         const input = try utils.readNumber(usize, stdin);
         switch (input) {
             1 => try anadirCancion(id_contrato + 1),
-            2 => try sql.rollbackToSavePoint("inicio_autor"),
-            3 => break,
+            2 => try sql.rollbackToSavePoint("contrato_creado"),
+            3 => try sql.rollbackToSavePoint("contrato_no_creado"),
+            4 => break,
             else => {},
         }
     }
@@ -589,24 +568,26 @@ fn crearContratoPromocion(nick: []const u8) !void {
         \\FROM contrato;
     ,
         .{},
-    )) orelse unreachable;
-    try sql.createSavePoint("inicio_promo");
+    )) orelse 0;
+    try sql.createSavePoint("contrato_no_creado");
     try sql.execute("BEGIN crear_contrato_promocion(?, ?, ?, ?); END;", .{
         id_contrato + 1,
         cuenta_banco,
         cantidad_pagar,
         fecha_vencimiento,
     });
+    try sql.createSavePoint("contrato_creado");
 
     while (true) {
         print("\nAquí le muestro sus canciones disponibles en SpotyCloud:\n", .{});
         try listarCancionesAutor(nick);
-        print("\n1. Añadir canción al contrato\n2. Eliminar canciones seleccionadas\n3. Finalizar contrato\n", .{});
+        print("\n1. Añadir canción al contrato\n2. Eliminar canciones seleccionadas\n3. Cancelar contrato\n4. Finalizar contrato\n", .{});
         const input = try utils.readNumber(usize, stdin);
         switch (input) {
             1 => try anadirCancion(id_contrato + 1),
-            2 => try sql.rollbackToSavePoint("inicio_promo"),
-            3 => break,
+            2 => try sql.rollbackToSavePoint("contrato_creado"),
+            3 => try sql.rollbackToSavePoint("contrato_no_creado"),
+            4 => break,
             else => {},
         }
     }
@@ -932,14 +913,7 @@ fn accederPlaylists() !void {
         return;
     };
 
-    var lista = try sql.query(Cancion_Sube,
-        \\SELECT * FROM playlist_publica WHERE id_playlist = ?
-    , .{input});
-    defer sql.getAllocator().free(lista);
-
-    for (lista) |fila| {
-        print("{d}. {s} - {s}\n", .{ fila.id_cancion, fila.titulo, fila.nick });
-    }
+    try listarCancionesPlaylist(id_playlist);
 }
 
 fn menuExplorar(nick: []const u8) !void {
@@ -958,18 +932,21 @@ fn menuExplorar(nick: []const u8) !void {
     }
 }
 
+fn esAutor(nick: []const u8) !bool {
+    const count = try sql.querySingleValue(u32,
+        \\ SELECT COUNT(*)
+        \\ FROM autor
+        \\ WHERE nick = ?;
+    , .{nick});
+    return count.? == 1;
+}
+
 fn menuPrincipal(nick: []const u8) !void {
     //Copio pego mi solución del menú cuenta para averiguar si eres autor o no. Probablemente haya formas mejores de hacerlo
+    const es_autor = try esAutor(nick);
 
     while (true) {
-        const count = try sql.querySingleValue(u32,
-            \\ SELECT COUNT(*)
-            \\ FROM autor
-            \\ WHERE nick = ?;
-        , .{nick});
-        const esAutor = count.? == 1;
-
-        if (esAutor) {
+        if (es_autor) {
             print("\n1. Mi cuenta\n2. Mis canciones\n3. Mis contratos\n4. Mis playlists\n5. Explorar\n6. Salir\n", .{});
             const input = try utils.readNumber(usize, stdin);
             switch (input) {
