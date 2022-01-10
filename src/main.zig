@@ -428,7 +428,7 @@ fn menuMisContratos(nick: []const u8) !void {
 fn listarContratos(nick: []const u8) !void {
     const contratos_autor = try sql.query(
         Contrato,
-        \\SELECT id_contrato, cuenta_bancaria, cantidad_pagada, fecha_creacion
+        \\SELECT DISTINCT id_contrato, cuenta_bancaria, cantidad_pagada, fecha_creacion
         \\FROM contrato_autor NATURAL JOIN contrato NATURAL JOIN firma NATURAL JOIN cancion_sube
         \\WHERE nick = ?;
     ,
@@ -469,7 +469,7 @@ fn listarContratos(nick: []const u8) !void {
 
     const contratos_promo = try sql.query(
         Contrato_Promocion,
-        \\SELECT id_contrato, cuenta_bancaria, cantidad_pagada, fecha_creacion, fecha_caducidad
+        \\SELECT DISTINCT id_contrato, cuenta_bancaria, cantidad_pagada, fecha_creacion, fecha_caducidad
         \\FROM contrato_promocion NATURAL JOIN contrato NATURAL JOIN firma NATURAL JOIN cancion_sube
         \\WHERE nick = ?;
     ,
@@ -501,6 +501,13 @@ fn anadirCancion(id_contrato: u32) !void {
     const id_cancion = try utils.readNumber(u8, stdin);
 
     sql.execute("BEGIN add_firma(?, ?); END;", .{ id_contrato, id_cancion }) catch |err| {
+        const sql_err = sql.getLastError() orelse return err;
+        defer sql_err.deinit();
+        print("Error añadiendo firma: {s}\n", .{sql_err.msg});
+        return;
+    };
+
+    sql.execute("BEGIN add_cancion(?, ?); END;", .{ id_cancion, id_contrato }) catch |err| {
         const sql_err = sql.getLastError() orelse return err;
         defer sql_err.deinit();
         print("Error añadiendo canción: {s}\n", .{sql_err.msg});
@@ -548,7 +555,7 @@ fn crearContratoAutor(nick: []const u8) !void {
         }
     }
 
-    print("\nContrato de autor creado!\n", .{});
+    print("\nProceso terminado!\n", .{});
     try sql.commit();
 }
 
@@ -603,7 +610,7 @@ fn crearContratoPromocion(nick: []const u8) !void {
     }
 
     try sql.commit();
-    print("Contrato de promocion creado!\n", .{});
+    print("Proceso terminado!\n", .{});
 }
 
 fn renovarContrato() !void {
