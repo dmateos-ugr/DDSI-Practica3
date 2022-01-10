@@ -142,7 +142,7 @@ fn subirCancion(nick: []const u8) !void {
     print("Introduce el título:\n", .{});
     const titulo = try utils.readString(stdin, &buf_titulo);
 
-    print("Introduce la ruta al archivo:\n", .{});
+    print("Introduce la ruta al archivo local:\n", .{});
     const archivo_ruta = try utils.readString(stdin, &buf_archivo_ruta);
     print("Subiendo archivo...\n", .{});
     const archivo_enlace = utils.uploadFile(global_allocator, archivo_ruta) catch |err| {
@@ -418,7 +418,7 @@ fn menuMisContratos(nick: []const u8) !void {
         switch (input) {
             1 => try crearContratoAutor(nick),
             2 => try crearContratoPromocion(nick),
-            3 => try renovarContrato(),
+            3 => try renovarContrato(nick),
             4 => break,
             else => {},
         }
@@ -613,7 +613,7 @@ fn crearContratoPromocion(nick: []const u8) !void {
     print("Proceso terminado!\n", .{});
 }
 
-fn renovarContrato() !void {
+fn renovarContrato(nick: []const u8) !void {
     print("\nIntroduce el indentificador del contrato de promoción que desea renovar:\n", .{});
     const id_cont = try utils.readNumber(u32, stdin);
 
@@ -629,7 +629,7 @@ fn renovarContrato() !void {
         .year = year,
     };
 
-    sql.execute("BEGIN renovar_contrato(?, ?); END;", .{ id_cont, fecha_renovacion }) catch |err| {
+    sql.execute("BEGIN renovar_contrato(?, ?, ?); END;", .{ nick, id_cont, fecha_renovacion }) catch |err| {
         const sql_err = sql.getLastError() orelse return err;
         defer sql_err.deinit();
         print("Error renovando contrato: {s}\n", .{sql_err.msg});
@@ -936,8 +936,8 @@ fn accederPlaylists() !void {
     print("Introduce el id de la playlist.", .{});
     const input = try utils.readNumber(u32, stdin);
     const id_playlist = (try sql.querySingleValue(u32,
-        // Busca entre las playlists públicas
-        // Quita de los resultados las que son de usuarios no activos
+    // Busca entre las playlists públicas
+    // Quita de los resultados las que son de usuarios no activos
         \\  SELECT * FROM playlist_publica WHERE id_playlist=? 
         \\ MINUS 
         \\  (SELECT id_playlist FROM playlists_crea NATURAL JOIN usuario_no_activo);
