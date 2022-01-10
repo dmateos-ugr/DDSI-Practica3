@@ -480,11 +480,11 @@ fn listarContratos(nick: []const u8) !void {
     }
 }
 
-fn anadirCancion(id_contrato: u32) !void {
+fn anadirCancion(nick: []const u8, id_contrato: u32) !void {
     print("\nIntroduce el identificador de la canción:\n", .{});
     const id_cancion = try utils.readNumber(u8, stdin);
 
-    sql.execute("BEGIN add_firma(?, ?); END;", .{ id_contrato, id_cancion }) catch |err| {
+    sql.execute("BEGIN add_firma(?, ?, ?); END;", .{ id_contrato, id_cancion, nick }) catch |err| {
         const sql_err = sql.getLastError() orelse return err;
         defer sql_err.deinit();
         print("Error añadiendo firma: {s}\n", .{sql_err.msg});
@@ -502,6 +502,7 @@ fn anadirCancion(id_contrato: u32) !void {
 }
 
 fn crearContratoAutor(nick: []const u8) !void {
+    // TODO fusionar esta mierda
     print("\nIntroduce cuenta bancaria en la que abonar:\n", .{});
     var buf_cuenta_banco: [consts.max_length.cuenta_banco]u8 = undefined;
     const cuenta_banco = try utils.readString(stdin, &buf_cuenta_banco);
@@ -531,7 +532,7 @@ fn crearContratoAutor(nick: []const u8) !void {
         print("\n1. Añadir canción al contrato\n2. Eliminar canciones seleccionadas\n3. Cancelar contrato\n4. Finalizar contrato\n", .{});
         const input = try utils.readNumber(usize, stdin);
         switch (input) {
-            1 => try anadirCancion(id_contrato + 1),
+            1 => try anadirCancion(nick, id_contrato + 1),
             2 => try sql.rollbackToSavePoint("contrato_creado"),
             3 => try sql.rollbackToSavePoint("contrato_no_creado"),
             4 => break,
@@ -544,6 +545,7 @@ fn crearContratoAutor(nick: []const u8) !void {
 }
 
 fn crearContratoPromocion(nick: []const u8) !void {
+    // TODO fusionar esta mierda
     print("\nIntroduce cuenta bancaria en la que abonar:\n", .{});
     var buf_cuenta_banco: [consts.max_length.cuenta_banco]u8 = undefined;
     const cuenta_banco = try utils.readString(stdin, &buf_cuenta_banco);
@@ -585,7 +587,7 @@ fn crearContratoPromocion(nick: []const u8) !void {
         print("\n1. Añadir canción al contrato\n2. Eliminar canciones seleccionadas\n3. Cancelar contrato\n4. Finalizar contrato\n", .{});
         const input = try utils.readNumber(usize, stdin);
         switch (input) {
-            1 => try anadirCancion(id_contrato + 1),
+            1 => try anadirCancion(nick, id_contrato + 1),
             2 => try sql.rollbackToSavePoint("contrato_creado"),
             3 => try sql.rollbackToSavePoint("contrato_no_creado"),
             4 => break,
