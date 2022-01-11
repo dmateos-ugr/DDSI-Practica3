@@ -1,7 +1,5 @@
 https://www.quora.com/What-is-the-easiest-way-to-store-files-in-the-Oracle-database
 
-firma apunta a donde no es
-
 puedes firmar contratos con canciones que no son tuyas
 
 imprimir canciones con titulo vacio
@@ -143,7 +141,7 @@ CREATE TABLE contrato_promocion(
 
 CREATE TABLE firma(
     id_contrato INTEGER  REFERENCES contrato(id_contrato),
-    id_cancion INTEGER REFERENCES cancion_activa(id_cancion),
+    id_cancion INTEGER REFERENCES cancion_sube(id_cancion),
     CONSTRAINT clave_primaria_firma PRIMARY KEY(id_contrato, id_cancion)
 );
 

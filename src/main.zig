@@ -182,17 +182,17 @@ fn imprimirCanciones(canciones: []const Cancion_Sube) void {
 
 fn listarCancionesAutor(autor: []const u8) !void {
     var lista = try sql.query(Cancion_Sube,
-    // Selecciona las canciones promocionadas
-    // Las une a:
-    // Las canciones activas menos las promocionadas (para que se muestren primero las promocionadas y no dos veces)
-    //Coge solo las del autor indicado
+        // Selecciona las canciones promocionadas
+        // Las une a:
+        // Las canciones activas menos las promocionadas (para que se muestren primero las promocionadas y no dos veces)
+        //Coge solo las del autor indicado
+        
         \\ SELECT * FROM 
         \\  (SELECT * FROM cancion_promocionada NATURAL JOIN cancion_sube
         \\  UNION
         \\  SELECT * FROM 
         \\      ((SELECT * FROM cancion_activa) MINUS (SELECT * FROM cancion_promocionada)) NATURAL JOIN cancion_sube)
         \\ WHERE nick = ?
-        \\ ORDER BY fecha;
     , .{autor});
     defer sql.getAllocator().free(lista);
     imprimirCanciones(lista);
@@ -205,28 +205,37 @@ fn listarCancionesTitulo() !void {
     const titulo = try utils.readString(stdin, &buf_titulo);
 
     var lista = try sql.query(Cancion_Sube,
-    // Coge las canciones promocionadas
-    // Las une a las canciones activas sin promocionar
-    // Quita las canciones de autores inactivos
-    // A esto aplica las búsquedas
+    // Es un poco difícil de entender.
+    // Lo que hace esta sentencia es obtener los ids de las canciones subidas por autores activos y las vendidas (dando igual si están activos o no)
+    // (SELECT id_cancion FROM cancion_sube NATURAL JOIN (SELECT nick FROM autor WHERE nick NOT IN (SELECT * FROM usuario_no_activo))
+    // UNION
+    // SELECT * FROM cancion_vendida)
+    // Lo que hace es intersecarlas con las promocionadas y de ahí saca los datos de las canciones.
+    // Luego el mismo grupo lo interseca con las activas no promocionadas y saca los datos.
+    // Luego lo junta todo y salen primero las promocionadas luego el resto.
+    // Y siempre son canciones activas de autores activos o vendidas si no es activo.
+    // Y en este conjunto aplica las búsquedas
+    // Nota: aunque se supone que tendrían que ordenarse con fecha cada uno de los dos subconjuntos que se unen, SQL es gilipollas y no lo permite
+    // Si se ordenan por fecha las búsquedas entonces no aparecen primero las promocionadas.
+
         \\ SELECT * FROM( 
-        \\      (
-        \\          SELECT * FROM cancion_promocionada NATURAL JOIN cancion_sube 
-        \\          UNION
-        \\          SELECT * FROM (
-        \\              (SELECT * FROM cancion_activa) MINUS (SELECT * FROM cancion_promocionada)
-        \\          ) 
-        \\          NATURAL JOIN 
-        \\          cancion_sube
-        \\      )
-        \\      MINUS
-        \\      (
-        \\          SELECT id_cancion, titulo, archivo_enlace, fecha, etiqueta, nick 
-        \\          FROM cancion_sube NATURAL JOIN usuario_no_activo
-        \\      )
-        \\ ) 
-        \\ WHERE LOWER(titulo) LIKE '%' || LOWER(?) || '%'
-        \\ ORDER BY fecha;
+        \\  SELECT * FROM 
+        \\      (SELECT * FROM (
+        \\                  (SELECT id_cancion FROM cancion_sube NATURAL JOIN (SELECT nick FROM autor WHERE nick NOT IN (SELECT * FROM usuario_no_activo))
+        \\              UNION 
+        \\                  SELECT * FROM cancion_vendida)
+        \\          INTERSECT 
+        \\              SELECT * FROM cancion_promocionada)
+        \\      NATURAL JOIN cancion_sube)
+        \\ UNION ALL 
+        \\  (SELECT * FROM (
+        \\              (SELECT id_cancion FROM cancion_sube NATURAL JOIN (SELECT nick FROM autor WHERE nick NOT IN (SELECT * FROM usuario_no_activo))
+        \\          UNION 
+        \\              SELECT * FROM cancion_vendida)
+        \\      INTERSECT 
+        \\          SELECT * FROM cancion_activa MINUS (SELECT * FROM cancion_promocionada)
+        \\  )NATURAL JOIN cancion_sube) 
+        \\ )WHERE LOWER(titulo) LIKE '%' || LOWER(?) || '%';
     , .{titulo});
     defer sql.getAllocator().free(lista);
     imprimirCanciones(lista);
@@ -480,25 +489,31 @@ fn listarContratos(nick: []const u8) !void {
     }
 }
 
-fn anadirCancion(nick: []const u8, id_contrato: u32) !void {
+fn anadirCancion(nick: []const u8, id_contrato: u32) !bool {
     print("\nIntroduce el identificador de la canción:\n", .{});
     const id_cancion = try utils.readNumber(u8, stdin);
+
+    try sql.createSavePoint("cancion_no_anadida");
 
     sql.execute("BEGIN add_firma(?, ?, ?); END;", .{ id_contrato, id_cancion, nick }) catch |err| {
         const sql_err = sql.getLastError() orelse return err;
         defer sql_err.deinit();
         print("Error añadiendo firma: {s}\n", .{sql_err.msg});
-        return;
+        try sql.rollbackToSavePoint("cancion_no_anadida");
+        return false;
     };
 
     sql.execute("BEGIN add_cancion(?, ?); END;", .{ id_cancion, id_contrato }) catch |err| {
         const sql_err = sql.getLastError() orelse return err;
         defer sql_err.deinit();
         print("Error añadiendo canción: {s}\n", .{sql_err.msg});
-        return;
+        try sql.rollbackToSavePoint("cancion_no_anadida");
+        return false;
     };
 
     print("\nCanción añadida al contrato!\n", .{});
+
+    return true;
 }
 
 fn crearContratoAutor(nick: []const u8) !void {
@@ -529,16 +544,24 @@ fn crearContratoAutor(nick: []const u8) !void {
     });
     try sql.createSavePoint("contrato_creado");
 
+    var hay_canciones = false;
+
     while (true) {
         print("\nAquí le muestro sus canciones disponibles en SpotyCloud:\n", .{});
         try listarCancionesAutor(nick);
-        print("\n1. Añadir canción al contrato\n2. Eliminar canciones seleccionadas\n3. Cancelar contrato\n4. Finalizar contrato\n", .{});
+        print("\n1. Añadir canción al contrato\n2. Eliminar canciones seleccionadas\n3. Cancelar contrato y salir\n4. Finalizar contrato\n", .{});
         const input = try utils.readNumber(usize, stdin);
         switch (input) {
-            1 => try anadirCancion(nick, id_contrato + 1),
+            1 => hay_canciones = try anadirCancion(nick, id_contrato + 1),
             2 => try sql.rollbackToSavePoint("contrato_creado"),
-            3 => try sql.rollbackToSavePoint("contrato_no_creado"),
-            4 => break,
+            3 => {
+                try sql.rollbackToSavePoint("contrato_no_creado");
+                break;
+            },
+            4 => {
+                if (!hay_canciones) try sql.rollbackToSavePoint("contrato_no_creado");
+                break;
+            },
             else => {},
         }
     }
@@ -584,16 +607,24 @@ fn crearContratoPromocion(nick: []const u8) !void {
     });
     try sql.createSavePoint("contrato_creado");
 
+    var hay_canciones = false;
+
     while (true) {
         print("\nAquí le muestro sus canciones disponibles en SpotyCloud:\n", .{});
         try listarCancionesAutor(nick);
-        print("\n1. Añadir canción al contrato\n2. Eliminar canciones seleccionadas\n3. Cancelar contrato\n4. Finalizar contrato\n", .{});
+        print("\n1. Añadir canción al contrato\n2. Eliminar canciones seleccionadas\n3. Cancelar contrato y salir\n4. Finalizar contrato\n", .{});
         const input = try utils.readNumber(usize, stdin);
         switch (input) {
-            1 => try anadirCancion(nick, id_contrato + 1),
+            1 => hay_canciones = try anadirCancion(nick, id_contrato + 1),
             2 => try sql.rollbackToSavePoint("contrato_creado"),
-            3 => try sql.rollbackToSavePoint("contrato_no_creado"),
-            4 => break,
+            3 => {
+                try sql.rollbackToSavePoint("contrato_no_creado");
+                break;
+            },
+            4 => {
+                if (!hay_canciones) try sql.rollbackToSavePoint("contrato_no_creado");
+                break;
+            },
             else => {},
         }
     }
@@ -903,13 +934,19 @@ fn accederPerfil() !void {
 fn listarCancionesPlaylist(id_playlist: u32) !void {
     print("\nCanciones de la playlist {d}:\n", .{id_playlist});
     var lista = try sql.query(Cancion_Sube,
-    // Coge las canciones en la playlist
-    // Y les quita las canciones que son de usuarios no activos
-        \\ SELECT * FROM 
-        \\  (SELECT id_cancion FROM contiene WHERE id_playlist = ? ) NATURAL JOIN cancion_sube
-        \\ MINUS
-        \\  SELECT id_cancion, titulo, archivo_enlace, fecha, etiqueta, nick 
-        \\  FROM cancion_sube NATURAL JOIN usuario_no_activo;
+    // Las canciones de la playlist las interseca con las válidas: las canciones activas o bien vendidas o bien con autor activo
+    // (Une a las canciones de autor activo con las vendidas, e interseca con las activas)
+    // Luego unión natural a cancion sube para tener el resto de datos
+
+        \\ SELECT * FROM(
+        \\          ((SELECT id_cancion FROM cancion_sube NATURAL JOIN (SELECT nick FROM autor WHERE nick NOT IN (SELECT * FROM usuario_no_activo))
+        \\      UNION 
+        \\          SELECT * FROM cancion_vendida)
+        \\  INTERSECT
+        \\      SELECT id_cancion FROM cancion_activa)
+        \\ INTERSECT
+        \\  SELECT id_cancion FROM contiene WHERE id_playlist=?)
+        \\ NATURAL JOIN cancion_sube;
     , .{id_playlist});
     defer sql.getAllocator().free(lista);
 
@@ -925,8 +962,13 @@ fn accederCancion(nick: []const u8) !void {
     // Comprobar que existe
     _ = (try sql.querySingleValue(
         u32,
-        // Busca la canción entre las canciones activas, pero les quita las canciones de usuarios no activos
-        "(SELECT * FROM cancion_activa WHERE id_cancion=?) MINUS (SELECT id_cancion FROM cancion_sube NATURAL JOIN usuario_no_activo);",
+        // Busca la canción entre las canciones activas, pero les quita las canciones de usuarios no activos que no están vendidas
+        \\  (SELECT * FROM cancion_activa WHERE id_cancion=?) 
+        \\ MINUS 
+        \\      ((SELECT id_cancion FROM cancion_sube NATURAL JOIN usuario_no_activo) 
+        \\  MINUS 
+        \\      (SELECT * FROM cancion_vendida));
+    ,
         .{id_cancion},
     )) orelse {
         print("Error: canción no encontrada\n", .{});
@@ -936,16 +978,22 @@ fn accederCancion(nick: []const u8) !void {
     try menuCancion(nick, id_cancion);
 }
 
-fn accederPlaylists() !void {
+fn accederPlaylists(nick: []const u8) !void {
     print("Introduce el id de la playlist.", .{});
     const input = try utils.readNumber(u32, stdin);
     const id_playlist = (try sql.querySingleValue(u32,
-    // Busca entre las playlists públicas
-    // Quita de los resultados las que son de usuarios no activos
-        \\  SELECT * FROM playlist_publica WHERE id_playlist=? 
-        \\ MINUS 
-        \\  (SELECT id_playlist FROM playlists_crea NATURAL JOIN usuario_no_activo);
-    , .{input})) orelse {
+    // Une a las playlists (tanto publicas como privadas) del usuario las publicas
+    // Quita las de usuarios inactivas
+    // Busca en este conjunto
+
+        \\ SELECT * FROM (
+        \\  (SELECT id_playlist FROM playlists_crea WHERE nick = ?)
+        \\ UNION
+        \\      (SELECT * FROM playlist_publica)
+        \\  MINUS
+        \\      (SELECT id_playlist FROM playlists_crea NATURAL JOIN usuario_no_activo))
+        \\ WHERE id_playlist = ?;
+    , .{ nick, input })) orelse {
         print("Error: playlist no encontrada\n", .{});
         return;
     };
@@ -962,7 +1010,7 @@ fn menuExplorar(nick: []const u8) !void {
             2 => try listarPlaylists(nick),
             3 => try accederCancion(nick),
             4 => try accederPerfil(),
-            5 => try accederPlaylists(),
+            5 => try accederPlaylists(nick),
             6 => break,
             else => {},
         }
