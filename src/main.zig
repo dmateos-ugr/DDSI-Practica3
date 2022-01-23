@@ -982,10 +982,10 @@ fn esAutor(nick: []const u8) !bool {
 }
 
 fn menuPrincipal(nick: []const u8) !void {
-    //Copio pego mi solución del menú cuenta para averiguar si eres autor o no. Probablemente haya formas mejores de hacerlo
-    const es_autor = try esAutor(nick);
-
     while (true) {
+        //Copio pego mi solución del menú cuenta para averiguar si eres autor o no. Probablemente haya formas mejores de hacerlo
+        const es_autor = try esAutor(nick);
+
         if (es_autor) {
             print("\n1. Mi cuenta\n2. Mis canciones\n3. Mis contratos\n4. Mis playlists\n5. Explorar\n6. Salir\n", .{});
             const input = try utils.readNumber(usize, stdin);
