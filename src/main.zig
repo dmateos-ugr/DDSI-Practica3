@@ -507,7 +507,11 @@ fn crearContrato(nick: []const u8, tipo_contrato: TipoContrato) !void {
     var buf_cuenta_banco: [consts.max_length.cuenta_banco]u8 = undefined;
     const cuenta_banco = try utils.readString(stdin, &buf_cuenta_banco);
 
-    print("\nIntroduce la cantidad a pagar:\n", .{});
+    if (tipo_contrato == .promocion) {
+        print("\nIntroduce la cantidad que desea pagar por sus canciones:\n", .{});
+    } else {
+        print("\nIntroduce la cantidad que quiere recibir por sus canciones:\n", .{});
+    }
     const cantidad_pagar = try utils.readNumber(u32, stdin);
 
     // Obtener el id del contrato que vamos a crear
@@ -522,43 +526,54 @@ fn crearContrato(nick: []const u8, tipo_contrato: TipoContrato) !void {
 
     try sql.createSavePoint("contrato_no_creado");
 
-    // Crear el contrato
-    (blk: {
-        if (tipo_contrato == .promocion) {
-            print("Introduce la fecha de vencimiento del contrato (dia): \n", .{});
-            const day = try utils.readNumber(u8, stdin);
-            print("Introduce la fecha de vencimiento del contrato (mes): \n", .{});
-            const month = try utils.readNumber(u8, stdin);
-            print("Introduce la fecha de vencimiento del contrato (año): \n", .{});
-            const year = try utils.readNumber(i16, stdin);
-            const fecha_vencimiento = sql.SqlDate{
-                .day = day,
-                .month = month,
-                .year = year,
-            };
-            break :blk sql.execute("BEGIN crear_contrato_promocion(?, ?, ?, ?); END;", .{
-                id_contrato,
-                cuenta_banco,
-                cantidad_pagar,
-                fecha_vencimiento,
-            });
-        } else {
-            break :blk sql.execute("BEGIN crear_contrato_autor(?, ?, ?); END;", .{
-                id_contrato,
-                cuenta_banco,
-                cantidad_pagar,
-            });
-        }
-    }) catch |err| {
-        const sql_err = sql.getLastError() orelse return err;
-        defer sql_err.deinit();
-        print("Error creando contrato: {s}\n", .{sql_err.msg});
-        return;
+    var fecha_vencimiento = sql.SqlDate{
+        .day = 0,
+        .month = 0,
+        .year = 0,
     };
+
+    // Crear el contrato
+    if (tipo_contrato == .promocion) {
+        print("Introduce la fecha de vencimiento del contrato (dia): \n", .{});
+        const day = try utils.readNumber(u8, stdin);
+        print("Introduce la fecha de vencimiento del contrato (mes): \n", .{});
+        const month = try utils.readNumber(u8, stdin);
+        print("Introduce la fecha de vencimiento del contrato (año): \n", .{});
+        const year = try utils.readNumber(i16, stdin);
+        fecha_vencimiento = sql.SqlDate{
+            .day = day,
+            .month = month,
+            .year = year,
+        };
+        sql.execute("BEGIN crear_contrato_promocion(?, ?, ?, ?); END;", .{
+            id_contrato,
+            cuenta_banco,
+            cantidad_pagar,
+            fecha_vencimiento,
+        }) catch |err| {
+            const sql_err = sql.getLastError() orelse return err;
+            defer sql_err.deinit();
+            print("Error creando contrato: {s}\n", .{sql_err.msg});
+            return;
+        };
+    } else {
+        sql.execute("BEGIN crear_contrato_autor(?, ?, ?); END;", .{
+            id_contrato,
+            cuenta_banco,
+            cantidad_pagar,
+        }) catch |err| {
+            const sql_err = sql.getLastError() orelse return err;
+            defer sql_err.deinit();
+            print("Error creando contrato: {s}\n", .{sql_err.msg});
+            return;
+        };
+    }
 
     try sql.createSavePoint("contrato_creado");
 
     var hay_canciones = false;
+    var num_canciones: usize = 0;
+    var contrato_valido = true;
     while (true) {
         print("\nAquí le muestro sus canciones disponibles en SpotyCloud:\n", .{});
         try listarCancionesAutor(nick);
@@ -568,23 +583,46 @@ fn crearContrato(nick: []const u8, tipo_contrato: TipoContrato) !void {
         print("\n1. Añadir canción al contrato\n2. Eliminar canciones seleccionadas\n3. Cancelar contrato y salir\n4. Finalizar contrato\n", .{});
         const input = try utils.readNumber(usize, stdin);
         switch (input) {
-            1 => hay_canciones = (try anadirCancion(nick, id_contrato)) or hay_canciones,
+            1 => {
+                if (try anadirCancion(nick, id_contrato)) {
+                    hay_canciones = true;
+                    num_canciones = num_canciones + 1;
+                }
+            },
             2 => try sql.rollbackToSavePoint("contrato_creado"),
             3 => {
                 try sql.rollbackToSavePoint("contrato_no_creado");
                 return;
             },
-            4 => break,
+            4 => {
+                if (tipo_contrato == .promocion) {
+                    const fecha_actual = utils.DateTime.fromTimestamp(std.time.timestamp());
+                    const meses_contr = (fecha_vencimiento.year - @intCast(c_short, fecha_actual.year) - 1) * 12 + @intCast(c_short, fecha_vencimiento.month) + 12 - fecha_actual.month;
+
+                    if (20 * @intCast(c_short, num_canciones) * meses_contr > cantidad_pagar) {
+                        contrato_valido = false;
+                        print("\nPrecio demasiado bajo. Estamos dispuestos a aceptar: {d}.\nCancelando contrato.", .{20 * @intCast(c_short, num_canciones) * meses_contr});
+                        try sql.rollbackToSavePoint("contrato_no_creado");
+                    }
+                } else {
+                    if (@intCast(c_short, num_canciones) * 100 < cantidad_pagar) {
+                        contrato_valido = false;
+                        print("\nPrecio demasiado alto. Estamos dispuestos a pagar: {d}.\nCancelando contrato.", .{@intCast(c_short, num_canciones) * 100});
+                        try sql.rollbackToSavePoint("contrato_no_creado");
+                    }
+                }
+                break;
+            },
             else => {},
         }
     }
 
-    if (!hay_canciones) {
+    if (!hay_canciones or !contrato_valido) {
         try sql.rollbackToSavePoint("contrato_no_creado");
-        print("\nYa que no se ha añadido ninguna canción, el contrato no se ha creado.\n", .{});
+        print("\nContrato no creado.\n", .{});
     } else {
         try sql.commit();
-        print("\nContrato creado !\n", .{});
+        print("\nContrato creado!\n", .{});
     }
 }
 
